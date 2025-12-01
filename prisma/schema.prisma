@@ -1,0 +1,142 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  password         String
+  unipileAccountId String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  templates        MessageTemplate[]
+  sequences        OutreachSequence[]
+}
+
+model MessageTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  content   String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sequenceSteps SequenceStep[]
+}
+
+// Outreach Sequence - a campaign to send invites/messages to multiple profiles
+model OutreachSequence {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  status      String   @default("draft") // draft, active, paused, completed
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Store target profiles as JSON array of profile data
+  // Each profile: { id, firstName, lastName, headline, profilePicture, publicIdentifier, location }
+  targetProfiles String @default("[]")
+
+  // Scheduling settings
+  dailyLimit     Int @default(30) // Max invites per day (LinkedIn limit is ~100/day, 200/week)
+  delayMinMinutes Int @default(5) // Minimum delay between invites
+  delayMaxMinutes Int @default(15) // Maximum delay between invites
+
+  // Stats
+  totalTargets   Int @default(0)
+  sentCount      Int @default(0)
+  acceptedCount  Int @default(0)
+  failedCount    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  steps      SequenceStep[]
+  executions SequenceExecution[]
+}
+
+// Step in a sequence (e.g., send invite, wait, send follow-up message)
+model SequenceStep {
+  id         String   @id @default(cuid())
+  sequenceId String
+  sequence   OutreachSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  order      Int // Step order (1, 2, 3...)
+  type       String // "invite", "message", "wait"
+
+  // For invite/message steps
+  templateId String?
+  template   MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  customMessage String? // If not using template
+
+  // For wait steps (delay before next step)
+  delayDays    Int @default(0)
+  delayHours   Int @default(0)
+  delayMinutes Int @default(0)
+
+  // Condition for this step (e.g., only if invite accepted)
+  condition  String? // "invite_accepted", "no_reply", etc.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  executionSteps SequenceExecutionStep[]
+}
+
+// Execution tracking for each target profile in a sequence
+model SequenceExecution {
+  id         String   @id @default(cuid())
+  sequenceId String
+  sequence   OutreachSequence @relation(fields: [sequenceId], references: [id], onDelete: Cascade)
+
+  // Target profile info (denormalized for quick access)
+  profileId   String
+  profileName String
+  profileData String // JSON with full profile data
+
+  status      String @default("pending") // pending, in_progress, completed, failed, paused
+  currentStep Int @default(0)
+
+  // Timestamps
+  startedAt   DateTime?
+  completedAt DateTime?
+  nextActionAt DateTime? // When to execute next step
+
+  // Error tracking
+  lastError   String?
+  retryCount  Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  steps SequenceExecutionStep[]
+}
+
+// Individual step execution within a sequence execution
+model SequenceExecutionStep {
+  id          String   @id @default(cuid())
+  executionId String
+  execution   SequenceExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  stepId      String
+  step        SequenceStep @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  stepOrder   Int
+
+  status      String @default("pending") // pending, sent, failed, skipped
+  sentAt      DateTime?
+  error       String?
+
+  // Response tracking
+  messageId   String? // ID from LinkedIn/Unipile if message was sent
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
