@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
+import { notifyRegister } from '@/lib/mail'
 
 export async function POST(request: NextRequest) {
   try {
@@ -39,6 +40,8 @@ export async function POST(request: NextRequest) {
       sameSite: 'lax',
       maxAge: 60 * 60 * 24 * 7, // 7 days
     })
+
+    notifyRegister(user.email)
 
     return NextResponse.json({
       success: true,

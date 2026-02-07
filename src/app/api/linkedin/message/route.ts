@@ -14,10 +14,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { recipientId, message } = await request.json()
+    const { recipientId, chatId, message } = await request.json()
 
-    if (!recipientId || !message) {
-      return NextResponse.json({ error: "Recipient ID and message are required" }, { status: 400 })
+    if ((!recipientId && !chatId) || !message) {
+      return NextResponse.json({ error: "Recipient ID or Chat ID, and message are required" }, { status: 400 })
     }
 
     if (message.length > 1000) {
@@ -28,6 +28,32 @@ export async function POST(request: NextRequest) {
     if (unipileAccountId) {
       try {
         const client = getUnipileClient()
+
+        // Reply to existing chat via REST API directly
+        if (chatId) {
+          const baseUrl = process.env.UNIPILE_API_URL
+          const token = process.env.UNIPILE_ACCESS_TOKEN
+
+          const formData = new FormData()
+          formData.append("text", message)
+
+          const sendRes = await fetch(`${baseUrl}/api/v1/chats/${chatId}/messages`, {
+            method: "POST",
+            headers: {
+              "X-API-KEY": token!,
+            },
+            body: formData,
+          })
+
+          if (!sendRes.ok) {
+            const errData = await sendRes.text()
+            console.error("Unipile send message error:", sendRes.status, errData)
+            return NextResponse.json({ error: "Failed to send message." }, { status: sendRes.status })
+          }
+
+          const data = await sendRes.json()
+          return NextResponse.json({ success: true, message_id: data.message_id })
+        }
 
         // Start a new chat with the recipient (LinkedIn connections only, no InMail)
         const response = await client.messaging.startNewChat({
@@ -43,9 +69,13 @@ export async function POST(request: NextRequest) {
         })
 
         return NextResponse.json({ success: true, chat_id: response.chat_id })
-      } catch (error) {
-        console.error("Unipile message send error:", error)
-        return NextResponse.json({ error: "Failed to send message. Please try again." }, { status: 500 })
+      } catch (error: unknown) {
+        const errBody = (error as { body?: unknown })?.body
+        console.error("Unipile message send error:", error, "body:", JSON.stringify(errBody))
+        const detail = typeof errBody === "object" && errBody && "message" in errBody
+          ? String((errBody as { message: unknown }).message)
+          : "Failed to send message. Please try again."
+        return NextResponse.json({ error: detail }, { status: 500 })
       }
     }
 

@@ -23,9 +23,9 @@ export function DashboardShell({ linkedinConnected, children }: DashboardShellPr
         linkedinConnected={linkedinConnected}
         onLogout={handleLogout}
       />
-      <main className="flex-1 overflow-y-auto bg-pattern">
-        <div className="min-h-full p-6 lg:p-8">
-          <div className="max-w-7xl mx-auto">
+      <main className="flex-1 flex flex-col min-h-0 overflow-hidden bg-pattern">
+        <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-6 lg:p-8 [&:has(>[data-fill-height])]:overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-0 max-w-7xl mx-auto w-full">
             {children}
           </div>
         </div>

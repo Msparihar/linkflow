@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { getUnipileClient } from "@/lib/unipile"
+import {
+  getCachedConnections,
+  getCachedConnectionsPaginated,
+  syncConnections,
+} from "@/lib/cache"
 
 export async function GET(request: NextRequest) {
   const cookieStore = await cookies()
@@ -8,64 +13,75 @@ export async function GET(request: NextRequest) {
   const unipileAccountId = cookieStore.get("unipile_account_id")?.value
   const accessToken = cookieStore.get("linkedin_access_token")?.value
 
-  // Check for user session
   if (!userId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   }
 
-  // Get pagination params from query string
   const searchParams = request.nextUrl.searchParams
   const cursor = searchParams.get("cursor")
   const limit = parseInt(searchParams.get("limit") || "20", 10)
   const fetchAll = searchParams.get("fetchAll") === "true"
 
-  // Try Unipile first
   if (unipileAccountId) {
     try {
-      const client = getUnipileClient()
-
-      // If fetching all connections (for search), paginate through everything
+      // fetchAll — serve from cache, sync in background if stale
       if (fetchAll) {
-        const allConnections: Array<{
-          id: unknown
-          firstName: string
-          lastName: string
-          headline: string
-          profilePicture: string
-        }> = []
-        let nextCursor: string | null = null
+        const cached = await getCachedConnections(unipileAccountId)
 
-        do {
-          const params: { account_id: string; limit: number; cursor?: string } = {
-            account_id: unipileAccountId,
-            limit: 100, // Max per request
-          }
-          if (nextCursor) {
-            params.cursor = nextCursor
-          }
+        if (cached && !cached.stale) {
+          // Fresh cache — return immediately
+          return NextResponse.json({
+            connections: cached.data,
+            cursor: null,
+            total: cached.data.length,
+          })
+        }
 
-          const relationsResponse = await client.users.getAllRelations(params)
+        if (cached && cached.stale) {
+          // Stale cache — return stale data, trigger background sync
+          // (fire and forget — don't await)
+          syncConnections(unipileAccountId).catch((err) =>
+            console.error("Background connection sync failed:", err)
+          )
+          return NextResponse.json({
+            connections: cached.data,
+            cursor: null,
+            total: cached.data.length,
+          })
+        }
 
-          const connections = relationsResponse.items?.map((relation: Record<string, unknown>) => ({
-            id: relation.member_id,
-            firstName: relation.first_name || '',
-            lastName: relation.last_name || '',
-            headline: relation.headline || '',
-            profilePicture: relation.profile_picture_url || '',
-          })) || []
-
-          allConnections.push(...connections)
-          nextCursor = relationsResponse.cursor as string | null
-        } while (nextCursor)
-
+        // No cache at all — must sync now (first load)
+        const connections = await syncConnections(unipileAccountId)
         return NextResponse.json({
-          connections: allConnections,
+          connections,
           cursor: null,
-          total: allConnections.length,
+          total: connections.length,
         })
       }
 
-      // Regular paginated fetch
+      // Paginated fetch — use DB cache if available, else Unipile
+      const offset = parseInt(cursor || "0", 10)
+      const cachedPage = await getCachedConnectionsPaginated(
+        unipileAccountId,
+        offset,
+        limit
+      )
+
+      if (cachedPage) {
+        // Serve from cache, trigger background sync if stale
+        if (cachedPage.stale) {
+          syncConnections(unipileAccountId).catch((err) =>
+            console.error("Background connection sync failed:", err)
+          )
+        }
+        return NextResponse.json({
+          connections: cachedPage.data,
+          cursor: cachedPage.hasMore ? String(offset + limit) : null,
+        })
+      }
+
+      // No cache — fall through to Unipile
+      const client = getUnipileClient()
       const params: { account_id: string; limit: number; cursor?: string } = {
         account_id: unipileAccountId,
         limit,

@@ -120,6 +120,43 @@ model SequenceExecution {
   steps SequenceExecutionStep[]
 }
 
+// ==========================================
+// Cache tables (UNLOGGED in PostgreSQL)
+// ==========================================
+
+model CachedConnection {
+  id         String   @id @default(cuid())
+  accountId  String
+  providerId String
+  data       Json
+  cachedAt   DateTime @default(now())
+
+  @@unique([accountId, providerId])
+  @@index([accountId])
+}
+
+model CachedProfile {
+  id         String   @id @default(cuid())
+  accountId  String
+  providerId String
+  data       Json
+  cachedAt   DateTime @default(now())
+
+  @@unique([accountId, providerId])
+  @@index([providerId])
+}
+
+model CachedChatAttendee {
+  id        String   @id @default(cuid())
+  accountId String
+  chatId    String
+  data      Json
+  cachedAt  DateTime @default(now())
+
+  @@unique([accountId, chatId])
+  @@index([accountId])
+}
+
 // Individual step execution within a sequence execution
 model SequenceExecutionStep {
   id          String   @id @default(cuid())
