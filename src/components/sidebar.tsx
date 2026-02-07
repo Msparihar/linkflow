@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Linkedin,
   LogOut,
+  Unlink,
   Search,
   Zap,
   Sparkles
@@ -21,11 +22,13 @@ import { cn } from "@/lib/utils"
 interface SidebarProps {
   linkedinConnected: boolean
   onLogout: () => void
+  onDisconnectLinkedin: () => void
 }
 
 export function Sidebar({
   linkedinConnected,
-  onLogout
+  onLogout,
+  onDisconnectLinkedin
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const pathname = usePathname()
@@ -193,9 +196,23 @@ export function Sidebar({
 
       {/* Footer */}
       <div className={cn(
-        "p-3 border-t border-border",
+        "p-3 border-t border-border space-y-1",
         collapsed && "px-2"
       )}>
+        {linkedinConnected && (
+          <Button
+            variant="ghost"
+            onClick={onDisconnectLinkedin}
+            className={cn(
+              "w-full justify-start gap-3 text-muted-foreground hover:text-orange-600 hover:bg-orange-500/10 transition-colors",
+              collapsed && "justify-center px-2"
+            )}
+            title={collapsed ? "Disconnect LinkedIn" : undefined}
+          >
+            <Unlink className="w-5 h-5 flex-shrink-0" />
+            {!collapsed && <span className="text-sm">Disconnect LinkedIn</span>}
+          </Button>
+        )}
         <Button
           variant="ghost"
           onClick={onLogout}

@@ -17,11 +17,17 @@ export function DashboardShell({ linkedinConnected, children }: DashboardShellPr
     router.refresh()
   }
 
+  const handleDisconnectLinkedin = async () => {
+    await fetch("/api/auth/unipile/disconnect", { method: "POST" })
+    router.refresh()
+  }
+
   return (
     <div className="flex h-screen bg-background">
       <Sidebar
         linkedinConnected={linkedinConnected}
         onLogout={handleLogout}
+        onDisconnectLinkedin={handleDisconnectLinkedin}
       />
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden bg-pattern">
         <div className="flex-1 flex flex-col min-h-0 overflow-y-auto p-6 lg:p-8 [&:has(>[data-fill-height])]:overflow-hidden">
