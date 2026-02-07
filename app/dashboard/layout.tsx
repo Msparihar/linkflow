@@ -13,7 +13,7 @@ export default async function DashboardLayout({
   const userId = cookieStore.get("user_id")
 
   if (!userId) {
-    redirect("/")
+    redirect("/login")
   }
 
   // Check if LinkedIn is connected

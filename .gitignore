@@ -1,6 +1,26 @@
 node_modules
-# Keep environment variables out of version control
-.env
-
-/lib/generated/prisma
 .next
+/lib/generated/prisma
+
+# Environment variables
+.env
+.env.*
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Database
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Data files
+*.csv
+
+# Docs (internal/generated)
+docs/
+
+# AI tooling
+.agents/

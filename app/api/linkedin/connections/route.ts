@@ -88,9 +88,11 @@ export async function GET(request: NextRequest) {
         connections,
         cursor: relationsResponse.cursor,
       })
-    } catch (error) {
+    } catch (error: unknown) {
+      const err = error as { body?: unknown; message?: string }
       console.error("Connections fetch error:", error)
-      return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+      console.error("Error body:", JSON.stringify(err.body, null, 2))
+      return NextResponse.json({ error: "Internal server error", details: err.body || err.message }, { status: 500 })
     }
   }
 

@@ -83,7 +83,7 @@ function AuthCallbackContent() {
                 Please try again.
               </p>
               <Button
-                onClick={() => (window.location.href = '/')}
+                onClick={() => (window.location.href = '/login')}
                 className="w-full"
               >
                 Try Again
