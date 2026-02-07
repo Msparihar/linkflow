@@ -1,9 +1,12 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import gsap from "gsap"
+import { ScrollTrigger } from "gsap/ScrollTrigger"
+import { useGSAP } from "@gsap/react"
 import {
   Linkedin,
   Users,
@@ -14,13 +17,13 @@ import {
   Sparkles,
   Search,
   Send,
-  ArrowLeft,
   Check,
 } from "lucide-react"
-import { useInView } from "@/hooks/use-in-view"
+
+gsap.registerPlugin(ScrollTrigger)
 
 /* ------------------------------------------------------------------ */
-/*  Dashboard Mockup (from V5)                                         */
+/*  Dashboard Mockup                                                    */
 /* ------------------------------------------------------------------ */
 function DashboardMockup() {
   const messages = [
@@ -54,16 +57,12 @@ function DashboardMockup() {
 
         {/* Chat area */}
         <div className="flex-1 flex flex-col p-3 gap-2 overflow-hidden">
-          {/* Chat header */}
           <div className="flex items-center gap-2 pb-2 border-b border-border mb-1">
             <img src="https://i.pravatar.cc/24?img=47" alt="Sarah Chen" className="w-6 h-6 rounded-full object-cover" />
-            <span className="text-xs font-medium text-foreground">
-              Sarah Chen
-            </span>
+            <span className="text-xs font-medium text-foreground">Sarah Chen</span>
             <span className="ml-auto text-[10px] text-green-500">online</span>
           </div>
 
-          {/* Messages */}
           <div className="flex-1 flex flex-col justify-end gap-1.5">
             {messages.map((msg, i) => (
               <div
@@ -91,8 +90,10 @@ function DashboardMockup() {
             ))}
           </div>
 
-          {/* Typing indicator */}
-          <div className="mr-auto flex items-end gap-1.5 animate-message-send opacity-0" style={{ animationDelay: "3.4s", animationFillMode: "forwards" }}>
+          <div
+            className="mr-auto flex items-end gap-1.5 animate-message-send opacity-0"
+            style={{ animationDelay: "3.4s", animationFillMode: "forwards" }}
+          >
             <img src="https://i.pravatar.cc/20?img=47" alt="" className="w-5 h-5 rounded-full object-cover shrink-0" />
             <div className="bg-muted rounded-2xl rounded-bl-sm px-3 py-2 flex items-center gap-1">
               <div className="w-1.5 h-1.5 rounded-full bg-muted-foreground/60 animate-pulse" />
@@ -107,32 +108,16 @@ function DashboardMockup() {
   )
 }
 
-function BentoTile({
-  children,
-  className = "",
-  delay = "stagger-1",
-}: {
-  children: React.ReactNode
-  className?: string
-  delay?: string
-}) {
-  const { ref, isInView } = useInView(0.15)
-  return (
-    <div
-      ref={ref}
-      className={`bg-card rounded-2xl border border-border p-6 md:p-8 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow duration-300 ${
-        isInView ? `animate-scale-fade-in ${delay}` : "opacity-0"
-      } ${className}`}
-    >
-      {children}
-    </div>
-  )
-}
+/* ------------------------------------------------------------------ */
+/*  Main Landing Component                                              */
+/* ------------------------------------------------------------------ */
+export function Landing() {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const heroRef = useRef<HTMLElement>(null)
+  const bentoRef = useRef<HTMLElement>(null)
+  const ctaRef = useRef<HTMLElement>(null)
 
-export function LandingBento() {
-  const { ref: ctaRef, isInView: ctaVisible } = useInView()
-
-  /* Typing effect — delayed to start after fade-up animation (400ms) */
+  /* Typing effect */
   const words = ["outreach", "messaging", "networking", "growth"]
   const [wordIndex, setWordIndex] = useState(0)
   const [text, setText] = useState("")
@@ -168,8 +153,186 @@ export function LandingBento() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, isDeleting, wordIndex, ready])
 
+  /* ---- GSAP Animations ---- */
+  useGSAP(
+    () => {
+      const mm = gsap.matchMedia()
+
+      mm.add("(prefers-reduced-motion: no-preference)", () => {
+        // --- Hero entrance ---
+        const heroTl = gsap.timeline({ defaults: { ease: "power3.out" } })
+
+        heroTl.from("[data-gsap-hero-badge]", {
+          y: 30,
+          opacity: 0,
+          duration: 0.6,
+        })
+        heroTl.from(
+          "[data-gsap-hero-heading]",
+          { y: 40, opacity: 0, duration: 0.7 },
+          "-=0.4"
+        )
+        heroTl.from(
+          "[data-gsap-hero-desc]",
+          { y: 30, opacity: 0, duration: 0.6 },
+          "-=0.4"
+        )
+        heroTl.from(
+          "[data-gsap-hero-buttons]",
+          { y: 20, opacity: 0, duration: 0.5 },
+          "-=0.3"
+        )
+        heroTl.from(
+          "[data-gsap-hero-mockup]",
+          {
+            y: 60,
+            opacity: 0,
+            scale: 0.95,
+            duration: 0.8,
+            ease: "power2.out",
+          },
+          "-=0.5"
+        )
+
+        // --- Hero parallax on scroll ---
+        gsap.to("[data-gsap-hero-bg]", {
+          yPercent: 30,
+          ease: "none",
+          scrollTrigger: {
+            trigger: heroRef.current,
+            start: "top top",
+            end: "bottom top",
+            scrub: 1.5,
+          },
+        })
+
+        gsap.to("[data-gsap-hero-mockup]", {
+          y: -40,
+          ease: "none",
+          scrollTrigger: {
+            trigger: heroRef.current,
+            start: "top top",
+            end: "bottom top",
+            scrub: 2,
+          },
+        })
+
+        // --- Bento tiles scroll-triggered ---
+        const tiles = gsap.utils.toArray<HTMLElement>("[data-gsap-bento-tile]")
+        tiles.forEach((tile, i) => {
+          gsap.from(tile, {
+            y: 50,
+            opacity: 0,
+            scale: 0.95,
+            duration: 0.7,
+            ease: "power2.out",
+            delay: i * 0.1,
+            scrollTrigger: {
+              trigger: tile,
+              start: "top 88%",
+              toggleActions: "play none none none",
+            },
+          })
+        })
+
+        // --- Bento tile content stagger (inner elements) ---
+        tiles.forEach((tile) => {
+          const inner = tile.querySelectorAll("[data-gsap-bento-inner]")
+          if (inner.length) {
+            gsap.from(inner, {
+              y: 20,
+              opacity: 0,
+              duration: 0.5,
+              stagger: 0.08,
+              ease: "power2.out",
+              scrollTrigger: {
+                trigger: tile,
+                start: "top 85%",
+                toggleActions: "play none none none",
+              },
+            })
+          }
+        })
+
+        // --- CTA section ---
+        gsap.from("[data-gsap-cta-heading]", {
+          y: 40,
+          opacity: 0,
+          duration: 0.7,
+          ease: "power2.out",
+          scrollTrigger: {
+            trigger: ctaRef.current,
+            start: "top 80%",
+            toggleActions: "play none none none",
+          },
+        })
+
+        gsap.from("[data-gsap-cta-desc]", {
+          y: 30,
+          opacity: 0,
+          duration: 0.6,
+          delay: 0.15,
+          ease: "power2.out",
+          scrollTrigger: {
+            trigger: ctaRef.current,
+            start: "top 80%",
+            toggleActions: "play none none none",
+          },
+        })
+
+        gsap.from("[data-gsap-cta-button]", {
+          y: 20,
+          opacity: 0,
+          scale: 0.95,
+          duration: 0.5,
+          delay: 0.3,
+          ease: "power2.out",
+          scrollTrigger: {
+            trigger: ctaRef.current,
+            start: "top 80%",
+            toggleActions: "play none none none",
+          },
+        })
+
+        // --- Footer slide up ---
+        gsap.from("[data-gsap-footer]", {
+          y: 20,
+          opacity: 0,
+          duration: 0.5,
+          ease: "power2.out",
+          scrollTrigger: {
+            trigger: "[data-gsap-footer]",
+            start: "top 95%",
+            toggleActions: "play none none none",
+          },
+        })
+      })
+
+      // Reduced motion: everything visible immediately
+      mm.add("(prefers-reduced-motion: reduce)", () => {
+        gsap.set(
+          [
+            "[data-gsap-hero-badge]",
+            "[data-gsap-hero-heading]",
+            "[data-gsap-hero-desc]",
+            "[data-gsap-hero-buttons]",
+            "[data-gsap-hero-mockup]",
+            "[data-gsap-bento-tile]",
+            "[data-gsap-bento-inner]",
+            "[data-gsap-cta-heading]",
+            "[data-gsap-cta-desc]",
+            "[data-gsap-cta-button]",
+            "[data-gsap-footer]",
+          ],
+          { opacity: 1, y: 0, scale: 1 }
+        )
+      })
+    },
+    { scope: containerRef }
+  )
+
   return (
-    <div className="min-h-screen bg-background">
+    <div ref={containerRef} className="min-h-screen bg-background">
       {/* Navbar */}
       <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-md border-b border-border">
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -178,7 +341,9 @@ export function LandingBento() {
             LinkedIn Connect
           </Link>
           <div className="hidden md:flex items-center gap-8 text-sm text-muted-foreground">
-            <a href="#features" className="hover:text-foreground transition-colors">Features</a>
+            <a href="#features" className="hover:text-foreground transition-colors">
+              Features
+            </a>
           </div>
           <Button asChild size="sm">
             <Link href="/login">Get Started</Link>
@@ -187,17 +352,25 @@ export function LandingBento() {
       </nav>
 
       {/* Hero */}
-      <section className="relative overflow-x-clip scroll-mt-20">
-        <div className="absolute inset-0 bg-mesh opacity-40 pointer-events-none" />
+      <section ref={heroRef} className="relative overflow-x-clip scroll-mt-20">
+        <div
+          data-gsap-hero-bg
+          className="absolute inset-0 bg-mesh opacity-40 pointer-events-none"
+        />
         <div className="max-w-6xl mx-auto px-6 py-16 md:py-24 grid md:grid-cols-2 gap-12 items-center relative z-10">
           {/* Left column */}
-          <div className="animate-fade-up">
-            <Badge variant="secondary" className="mb-6 gap-1.5">
-              <Sparkles className="size-3" />
-              Smarter LinkedIn Outreach
-            </Badge>
+          <div>
+            <div data-gsap-hero-badge>
+              <Badge variant="secondary" className="mb-6 gap-1.5">
+                <Sparkles className="size-3" />
+                Smarter LinkedIn Outreach
+              </Badge>
+            </div>
 
-            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] mb-6">
+            <h1
+              data-gsap-hero-heading
+              className="text-4xl md:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] mb-6"
+            >
               Streamline your
               <span className="block text-primary">
                 {text}
@@ -205,12 +378,15 @@ export function LandingBento() {
               </span>
             </h1>
 
-            <p className="text-lg text-muted-foreground max-w-md mb-8 leading-relaxed">
-              Automate personalized messaging, manage connections, and build sequences
-              that convert — all from one clean dashboard.
+            <p
+              data-gsap-hero-desc
+              className="text-lg text-muted-foreground max-w-md mb-8 leading-relaxed"
+            >
+              Automate personalized messaging, manage connections, and build
+              sequences that convert — all from one clean dashboard.
             </p>
 
-            <div className="flex items-center gap-4 flex-wrap">
+            <div data-gsap-hero-buttons className="flex items-center gap-4 flex-wrap">
               <Button asChild size="lg">
                 <Link href="/login">
                   Start for Free <ArrowRight className="size-4" />
@@ -223,22 +399,25 @@ export function LandingBento() {
           </div>
 
           {/* Right column — Animated Dashboard */}
-          <div className="animate-slide-up-in stagger-2">
+          <div data-gsap-hero-mockup>
             <DashboardMockup />
           </div>
         </div>
       </section>
 
       {/* Bento Features Grid */}
-      <section id="features" className="px-6 pb-20 scroll-mt-20">
+      <section ref={bentoRef} id="features" className="px-6 pb-20 scroll-mt-20">
         <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 md:grid-rows-2 gap-4">
-          {/* Messaging Tile — large, spans 2 cols */}
-          <BentoTile className="md:col-span-2" delay="stagger-1">
-            <div className="flex items-center gap-2 mb-5">
+          {/* Messaging Tile */}
+          <div
+            data-gsap-bento-tile
+            className="md:col-span-2 bg-card rounded-2xl border border-border p-6 md:p-8 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow duration-300"
+          >
+            <div data-gsap-bento-inner className="flex items-center gap-2 mb-5">
               <MessageSquare className="size-5 text-primary" />
               <h3 className="font-semibold text-foreground">Smart Messaging</h3>
             </div>
-            <div className="bg-muted/40 rounded-xl p-4 space-y-3">
+            <div data-gsap-bento-inner className="bg-muted/40 rounded-xl p-4 space-y-3">
               <div className="flex justify-start">
                 <div className="bg-muted text-foreground rounded-2xl rounded-bl-md px-4 py-2 text-sm max-w-[70%]">
                   Hey! I saw your talk on product-led growth — great insights.
@@ -261,21 +440,27 @@ export function LandingBento() {
                 <span className="text-xs text-muted-foreground ml-1">typing...</span>
               </div>
             </div>
-          </BentoTile>
+          </div>
 
-          {/* Connections Tile — tall, spans 2 rows */}
-          <BentoTile className="md:row-span-2" delay="stagger-2">
-            <div className="flex items-center gap-2 mb-5">
+          {/* Connections Tile */}
+          <div
+            data-gsap-bento-tile
+            className="md:row-span-2 bg-card rounded-2xl border border-border p-6 md:p-8 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow duration-300"
+          >
+            <div data-gsap-bento-inner className="flex items-center gap-2 mb-5">
               <Users className="size-5 text-primary" />
               <h3 className="font-semibold text-foreground">Connections</h3>
             </div>
-            <div className="flex items-center gap-2 mb-4">
+            <div data-gsap-bento-inner className="flex items-center gap-2 mb-4">
               <div className="flex-1 flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2 text-sm text-muted-foreground">
                 <Search className="size-3.5" />
                 <span>Search connections...</span>
               </div>
             </div>
-            <p className="text-2xl font-bold text-foreground mb-4">2,847 <span className="text-sm font-normal text-muted-foreground">connections</span></p>
+            <p data-gsap-bento-inner className="text-2xl font-bold text-foreground mb-4">
+              2,847{" "}
+              <span className="text-sm font-normal text-muted-foreground">connections</span>
+            </p>
             <div className="space-y-3">
               {[
                 { initials: "SK", name: "Sarah Kim", role: "VP of Sales, Stripe" },
@@ -284,7 +469,7 @@ export function LandingBento() {
                 { initials: "AP", name: "Alex Park", role: "CTO, Notion" },
                 { initials: "RB", name: "Rachel Brown", role: "PM Lead, Linear" },
               ].map((c) => (
-                <div key={c.initials} className="flex items-center gap-3">
+                <div key={c.initials} data-gsap-bento-inner className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-sm font-medium text-primary shrink-0">
                     {c.initials}
                   </div>
@@ -295,11 +480,14 @@ export function LandingBento() {
                 </div>
               ))}
             </div>
-          </BentoTile>
+          </div>
 
-          {/* Sequences Tile — medium */}
-          <BentoTile delay="stagger-3">
-            <div className="flex items-center gap-2 mb-5">
+          {/* Sequences Tile */}
+          <div
+            data-gsap-bento-tile
+            className="bg-card rounded-2xl border border-border p-6 md:p-8 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow duration-300"
+          >
+            <div data-gsap-bento-inner className="flex items-center gap-2 mb-5">
               <Zap className="size-5 text-primary" />
               <h3 className="font-semibold text-foreground">Sequences</h3>
             </div>
@@ -309,9 +497,13 @@ export function LandingBento() {
                 { day: "Day 3", label: "Follow up", done: true },
                 { day: "Day 7", label: "Close", done: false },
               ].map((step, i) => (
-                <div key={step.day} className="flex items-start gap-3">
+                <div key={step.day} data-gsap-bento-inner className="flex items-start gap-3">
                   <div className="flex flex-col items-center">
-                    <div className={`w-3 h-3 rounded-full ${step.done ? "bg-primary" : "bg-border"} shrink-0 mt-0.5`} />
+                    <div
+                      className={`w-3 h-3 rounded-full ${
+                        step.done ? "bg-primary" : "bg-border"
+                      } shrink-0 mt-0.5`}
+                    />
                     {i < 2 && <div className="w-0.5 h-8 bg-border" />}
                   </div>
                   <div className="pb-4">
@@ -326,22 +518,28 @@ export function LandingBento() {
                 </div>
               ))}
             </div>
-          </BentoTile>
+          </div>
 
-          {/* Templates Tile — medium */}
-          <BentoTile delay="stagger-4">
-            <div className="flex items-center gap-2 mb-5">
+          {/* Templates Tile */}
+          <div
+            data-gsap-bento-tile
+            className="bg-card rounded-2xl border border-border p-6 md:p-8 shadow-[var(--shadow-card)] hover:shadow-[var(--shadow-card-hover)] transition-shadow duration-300"
+          >
+            <div data-gsap-bento-inner className="flex items-center gap-2 mb-5">
               <FileText className="size-5 text-primary" />
               <h3 className="font-semibold text-foreground">Templates</h3>
             </div>
-            <div className="bg-muted/40 rounded-xl p-4 font-mono text-sm leading-relaxed text-foreground">
+            <div
+              data-gsap-bento-inner
+              className="bg-muted/40 rounded-xl p-4 font-mono text-sm leading-relaxed text-foreground"
+            >
               <p>
                 Hi <span className="text-primary font-mono text-sm">{"{{firstName}}"}</span>,
               </p>
               <p className="mt-2">
                 I noticed you&apos;re at{" "}
-                <span className="text-primary font-mono text-sm">{"{{company}}"}</span> — I&apos;d love
-                to connect about{" "}
+                <span className="text-primary font-mono text-sm">{"{{company}}"}</span> —
+                I&apos;d love to connect about{" "}
                 <span className="text-primary font-mono text-sm">{"{{topic}}"}</span>.
               </p>
               <p className="mt-2">Best,</p>
@@ -349,33 +547,39 @@ export function LandingBento() {
                 <span className="text-primary font-mono text-sm">{"{{senderName}}"}</span>
               </p>
             </div>
-            <div className="flex items-center gap-2 mt-4">
+            <div data-gsap-bento-inner className="flex items-center gap-2 mt-4">
               <Send className="size-3.5 text-muted-foreground" />
               <span className="text-xs text-muted-foreground">12 templates saved</span>
             </div>
-          </BentoTile>
+          </div>
         </div>
       </section>
 
       {/* CTA Section */}
       <section ref={ctaRef} className="py-24 px-6 text-center scroll-mt-20">
-        <div className={`max-w-2xl mx-auto ${ctaVisible ? "animate-fade-up" : "opacity-0"}`}>
-          <h2 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground mb-4">
+        <div className="max-w-2xl mx-auto">
+          <h2
+            data-gsap-cta-heading
+            className="text-3xl md:text-4xl font-bold tracking-tight text-foreground mb-4"
+          >
             Ready to transform your outreach?
           </h2>
-          <p className="text-muted-foreground mb-8">
-            Join thousands of professionals who close more deals with LinkedIn Connect.
+          <p data-gsap-cta-desc className="text-muted-foreground mb-8">
+            Join thousands of professionals who close more deals with LinkedIn
+            Connect.
           </p>
-          <Button asChild size="lg">
-            <Link href="/login">
-              Get Started Free <ArrowRight className="size-4" />
-            </Link>
-          </Button>
+          <div data-gsap-cta-button>
+            <Button asChild size="lg">
+              <Link href="/login">
+                Get Started Free <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border py-8 px-6">
+      <footer data-gsap-footer className="border-t border-border py-8 px-6">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-muted-foreground">
           <div className="flex items-center gap-2">
             <Linkedin className="size-4 text-primary" />

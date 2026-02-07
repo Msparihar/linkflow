@@ -1,5 +1,5 @@
-import { LandingBento } from "@/components/landing-v2-bento"
+import { Landing } from "@/components/landing"
 
 export default function Home() {
-  return <LandingBento />
+  return <Landing />
 }
