@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useQuery, useMutation } from "@tanstack/react-query"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
@@ -31,65 +32,53 @@ interface ConnectionMessageDialogProps {
 
 export function ConnectionMessageDialog({ connection, open, onOpenChange }: ConnectionMessageDialogProps) {
   const [message, setMessage] = useState("")
-  const [sending, setSending] = useState(false)
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle")
   const [errorMessage, setErrorMessage] = useState("")
-  const [templates, setTemplates] = useState<Template[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
 
-  useEffect(() => {
-    if (open) {
-      fetchTemplates()
-    }
-  }, [open])
-
-  const fetchTemplates = async () => {
-    try {
+  const { data: templates = [] } = useQuery({
+    queryKey: ["templates"],
+    queryFn: async () => {
       const res = await fetch("/api/templates")
-      if (res.ok) {
-        const data = await res.json()
-        setTemplates(data.templates || [])
-      }
-    } catch (error) {
-      console.error("Failed to fetch templates:", error)
-    }
-  }
+      if (!res.ok) throw new Error("Failed to fetch templates")
+      const data = await res.json()
+      return (data.templates || []) as Template[]
+    },
+    enabled: open,
+  })
 
-  const handleSend = async () => {
-    if (!message.trim() || !connection) return
-
-    setSending(true)
-    setStatus("idle")
-    setErrorMessage("")
-
-    try {
+  const sendMutation = useMutation({
+    mutationFn: async ({ recipientId, message }: { recipientId: string; message: string }) => {
       const res = await fetch("/api/linkedin/message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recipientId: connection.id,
-          message: message.trim(),
-        }),
+        body: JSON.stringify({ recipientId, message }),
       })
-
-      if (res.ok) {
-        setStatus("success")
-        setMessage("")
-        setTimeout(() => {
-          onOpenChange(false)
-          setStatus("idle")
-        }, 2000)
-      } else {
+      if (!res.ok) {
         const data = await res.json()
-        setStatus("error")
-        setErrorMessage(data.error || "Failed to send message")
+        throw new Error(data.error || "Failed to send message")
       }
-    } catch {
+      return res.json()
+    },
+    onSuccess: () => {
+      setStatus("success")
+      setMessage("")
+      setTimeout(() => {
+        onOpenChange(false)
+        setStatus("idle")
+      }, 2000)
+    },
+    onError: (error: Error) => {
       setStatus("error")
-      setErrorMessage("Network error. Please try again.")
-    } finally {
-      setSending(false)
-    }
+      setErrorMessage(error.message)
+    },
+  })
+
+  const handleSend = () => {
+    if (!message.trim() || !connection) return
+    setStatus("idle")
+    setErrorMessage("")
+    sendMutation.mutate({ recipientId: connection.id, message: message.trim() })
   }
 
   const handleClose = () => {
@@ -201,7 +190,7 @@ export function ConnectionMessageDialog({ connection, open, onOpenChange }: Conn
               "min-h-[150px] resize-none",
               charCount > 1000 && "border-destructive focus-visible:ring-destructive"
             )}
-            disabled={sending || status === "success"}
+            disabled={sendMutation.isPending || status === "success"}
           />
 
           <div className="flex items-center justify-between">
@@ -212,14 +201,14 @@ export function ConnectionMessageDialog({ connection, open, onOpenChange }: Conn
               {charCount > 900 && charCount <= 1000 && " (near limit)"}
             </p>
             <div className="flex gap-2">
-              <Button variant="outline" onClick={handleClose} disabled={sending}>
+              <Button variant="outline" onClick={handleClose} disabled={sendMutation.isPending}>
                 Cancel
               </Button>
               <Button
                 onClick={handleSend}
-                disabled={!message.trim() || sending || charCount > 1000 || status === "success"}
+                disabled={!message.trim() || sendMutation.isPending || charCount > 1000 || status === "success"}
               >
-                {sending ? (
+                {sendMutation.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Sending...

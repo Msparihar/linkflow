@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -27,71 +28,61 @@ interface TemplatesPanelProps {
 }
 
 export function TemplatesPanel({ onSelectTemplate, selectionMode = false }: TemplatesPanelProps) {
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingTemplate, setEditingTemplate] = useState<Template | null>(null)
   const [name, setName] = useState("")
   const [content, setContent] = useState("")
 
-  useEffect(() => {
-    fetchTemplates()
-  }, [])
-
-  const fetchTemplates = async () => {
-    try {
+  const { data: templates = [], isLoading } = useQuery({
+    queryKey: ["templates"],
+    queryFn: async () => {
       const res = await fetch("/api/templates")
-      if (res.ok) {
-        const data = await res.json()
-        setTemplates(data.templates || [])
-      }
-    } catch (error) {
-      console.error("Failed to fetch templates:", error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      if (!res.ok) throw new Error("Failed to fetch templates")
+      const data = await res.json()
+      return (data.templates || []) as Template[]
+    },
+  })
 
-  const handleSave = async () => {
-    if (!name.trim() || !content.trim()) return
-
-    setSaving(true)
-    try {
-      const url = editingTemplate ? `/api/templates/${editingTemplate.id}` : "/api/templates"
-      const method = editingTemplate ? "PUT" : "POST"
-
+  const saveMutation = useMutation({
+    mutationFn: async ({ id, name, content }: { id?: string; name: string; content: string }) => {
+      const url = id ? `/api/templates/${id}` : "/api/templates"
+      const method = id ? "PUT" : "POST"
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, content }),
       })
+      if (!res.ok) throw new Error("Failed to save template")
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["templates"] })
+      setDialogOpen(false)
+      setEditingTemplate(null)
+      setName("")
+      setContent("")
+    },
+  })
 
-      if (res.ok) {
-        fetchTemplates()
-        setDialogOpen(false)
-        setEditingTemplate(null)
-        setName("")
-        setContent("")
-      }
-    } catch (error) {
-      console.error("Failed to save template:", error)
-    } finally {
-      setSaving(false)
-    }
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/templates/${id}`, { method: "DELETE" })
+      if (!res.ok) throw new Error("Failed to delete template")
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["templates"] })
+    },
+  })
+
+  const handleSave = () => {
+    if (!name.trim() || !content.trim()) return
+    saveMutation.mutate({ id: editingTemplate?.id, name, content })
   }
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     if (!confirm("Are you sure you want to delete this template?")) return
-
-    try {
-      const res = await fetch(`/api/templates/${id}`, { method: "DELETE" })
-      if (res.ok) {
-        fetchTemplates()
-      }
-    } catch (error) {
-      console.error("Failed to delete template:", error)
-    }
+    deleteMutation.mutate(id)
   }
 
   const openEditDialog = (template: Template) => {
@@ -108,7 +99,7 @@ export function TemplatesPanel({ onSelectTemplate, selectionMode = false }: Temp
     setDialogOpen(true)
   }
 
-  if (loading) {
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -215,8 +206,8 @@ export function TemplatesPanel({ onSelectTemplate, selectionMode = false }: Temp
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSave} disabled={saving || !name.trim() || !content.trim()}>
-              {saving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            <Button onClick={handleSave} disabled={saveMutation.isPending || !name.trim() || !content.trim()}>
+              {saveMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {editingTemplate ? "Save Changes" : "Create Template"}
             </Button>
           </DialogFooter>

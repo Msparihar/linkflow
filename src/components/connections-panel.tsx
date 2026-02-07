@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -43,15 +44,6 @@ interface ConnectionsPanelProps {
 
 export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelProps) {
   const [searchQuery, setSearchQuery] = useState("")
-  const [connections, setConnections] = useState<Connection[]>([])
-  const [allConnections, setAllConnections] = useState<Connection[]>([])
-  const [filteredConnections, setFilteredConnections] = useState<Connection[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadingMore, setLoadingMore] = useState(false)
-  const [loadingAll, setLoadingAll] = useState(false)
-  const [allLoaded, setAllLoaded] = useState(false)
-  const [cursor, setCursor] = useState<string | null>(null)
-  const [hasMore, setHasMore] = useState(true)
   const [sortBy, setSortBy] = useState<SortOption>("name-asc")
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -64,13 +56,54 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
   const observerRef = useRef<IntersectionObserver | null>(null)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => {
-    fetchConnections()
-    fetchAllConnectionsInBackground()
-  }, [])
+  // Paginated connections for infinite scroll
+  const {
+    data: paginatedData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading,
+  } = useInfiniteQuery({
+    queryKey: ["connections"],
+    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
+      const params = new URLSearchParams({ limit: "20" })
+      if (pageParam) params.set("cursor", pageParam)
+      const res = await fetch(`/api/linkedin/connections?${params}`)
+      if (!res.ok) throw new Error("Failed to fetch connections")
+      return res.json() as Promise<{ connections: Connection[]; cursor?: string }>
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.cursor || undefined,
+  })
 
+  // Background fetch of all connections
+  const { data: allConnectionsData, isLoading: loadingAll } = useQuery({
+    queryKey: ["connections-all"],
+    queryFn: async () => {
+      const res = await fetch("/api/linkedin/connections?fetchAll=true")
+      if (!res.ok) throw new Error("Failed to fetch all connections")
+      const data = await res.json()
+      return (data.connections || []) as Connection[]
+    },
+  })
+
+  const allConnections = allConnectionsData || []
+  const paginatedConnections = useMemo(
+    () => paginatedData?.pages.flatMap(p => p.connections) || [],
+    [paginatedData]
+  )
+
+  // Report count when all connections load
   useEffect(() => {
-    const connectionsToSearch = allLoaded ? allConnections : connections
+    if (allConnections.length > 0) {
+      onConnectionCountChange?.(allConnections.length)
+    }
+  }, [allConnections.length, onConnectionCountChange])
+
+  const allLoaded = !!allConnectionsData
+
+  const filteredConnections = useMemo(() => {
+    const connectionsToSearch = allLoaded ? allConnections : paginatedConnections
     let result = connectionsToSearch
 
     if (searchQuery.trim()) {
@@ -96,8 +129,8 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
       }
     })
 
-    setFilteredConnections(result)
-  }, [searchQuery, connections, allConnections, allLoaded, sortBy])
+    return result
+  }, [searchQuery, paginatedConnections, allConnections, allLoaded, sortBy])
 
   // Intersection observer for infinite scroll
   useEffect(() => {
@@ -105,8 +138,8 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
 
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !searchQuery) {
-          loadMoreConnections()
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage && !searchQuery) {
+          fetchNextPage()
         }
       },
       { threshold: 0.1 }
@@ -115,60 +148,7 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
     if (loadMoreRef.current) observerRef.current.observe(loadMoreRef.current)
 
     return () => observerRef.current?.disconnect()
-  }, [hasMore, loadingMore, cursor, searchQuery])
-
-  const fetchConnections = async () => {
-    setLoading(true)
-    try {
-      const res = await fetch("/api/linkedin/connections?limit=20")
-      if (res.ok) {
-        const data = await res.json()
-        setConnections(data.connections || [])
-        setCursor(data.cursor || null)
-        setHasMore(!!data.cursor)
-      }
-    } catch (error) {
-      console.error("Failed to fetch connections:", error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadMoreConnections = async () => {
-    if (!cursor || loadingMore) return
-
-    setLoadingMore(true)
-    try {
-      const res = await fetch(`/api/linkedin/connections?limit=20&cursor=${encodeURIComponent(cursor)}`)
-      if (res.ok) {
-        const data = await res.json()
-        setConnections(prev => [...prev, ...(data.connections || [])])
-        setCursor(data.cursor || null)
-        setHasMore(!!data.cursor)
-      }
-    } catch (error) {
-      console.error("Failed to load more:", error)
-    } finally {
-      setLoadingMore(false)
-    }
-  }
-
-  const fetchAllConnectionsInBackground = async () => {
-    setLoadingAll(true)
-    try {
-      const res = await fetch("/api/linkedin/connections?fetchAll=true")
-      if (res.ok) {
-        const data = await res.json()
-        setAllConnections(data.connections || [])
-        setAllLoaded(true)
-        onConnectionCountChange?.(data.connections?.length || 0)
-      }
-    } catch (error) {
-      console.error("Failed to fetch all:", error)
-    } finally {
-      setLoadingAll(false)
-    }
-  }
+  }, [hasNextPage, isFetchingNextPage, searchQuery, fetchNextPage])
 
   const toggleSelection = (id: string) => {
     setSelectedIds(prev => {
@@ -278,7 +258,7 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
       </div>
 
       {/* Connections Grid */}
-      {loading ? (
+      {isLoading ? (
         <div className="flex flex-col items-center justify-center py-20">
           <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
           <p className="text-muted-foreground">Loading connections...</p>
@@ -361,15 +341,15 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
           </div>
 
           {/* Load more */}
-          {!searchQuery && hasMore && (
+          {!searchQuery && hasNextPage && (
             <div ref={loadMoreRef} className="flex justify-center py-8">
-              {loadingMore ? (
+              {isFetchingNextPage ? (
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="w-5 h-5 animate-spin" />
                   <span>Loading more...</span>
                 </div>
               ) : (
-                <Button variant="outline" onClick={loadMoreConnections} className="shadow-sm">
+                <Button variant="outline" onClick={() => fetchNextPage()} className="shadow-sm">
                   <UserPlus className="w-4 h-4 mr-2" />
                   Load More Connections
                 </Button>

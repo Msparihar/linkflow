@@ -1,6 +1,7 @@
 import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { DashboardShell } from "@/components/dashboard-shell"
+import { QueryProvider } from "@/components/query-provider"
 
 export default async function DashboardLayout({
   children,
@@ -21,8 +22,10 @@ export default async function DashboardLayout({
   const linkedinConnected = !!unipileAccountId
 
   return (
-    <DashboardShell linkedinConnected={linkedinConnected}>
-      {children}
-    </DashboardShell>
+    <QueryProvider>
+      <DashboardShell linkedinConnected={linkedinConnected}>
+        {children}
+      </DashboardShell>
+    </QueryProvider>
   )
 }

@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useQuery, useMutation } from "@tanstack/react-query"
 import {
   Dialog,
   DialogContent,
@@ -59,93 +60,92 @@ export function BulkMessageDialog({
   onComplete
 }: BulkMessageDialogProps) {
   const [message, setMessage] = useState("")
-  const [sending, setSending] = useState(false)
-  const [results, setResults] = useState<SendResult[]>([])
-  const [templates, setTemplates] = useState<Template[]>([])
   const [showTemplates, setShowTemplates] = useState(false)
+  const [results, setResults] = useState<SendResult[]>([])
   const [progress, setProgress] = useState(0)
 
-  useEffect(() => {
-    if (open) {
-      fetchTemplates()
-      setMessage("")
-      setResults([])
-      setProgress(0)
-    }
-  }, [open])
-
-  const fetchTemplates = async () => {
-    try {
+  const { data: templates = [] } = useQuery({
+    queryKey: ["templates"],
+    queryFn: async () => {
       const res = await fetch("/api/templates")
-      if (res.ok) {
-        const data = await res.json()
-        setTemplates(data.templates || [])
-      }
-    } catch (error) {
-      console.error("Failed to fetch templates:", error)
-    }
-  }
+      if (!res.ok) throw new Error("Failed to fetch templates")
+      const data = await res.json()
+      return (data.templates || []) as Template[]
+    },
+    enabled: open,
+  })
 
-  const handleSend = async () => {
-    if (!message.trim() || connections.length === 0) return
+  const bulkSendMutation = useMutation({
+    mutationFn: async ({ connections, message }: { connections: Connection[]; message: string }) => {
+      setResults(connections.map(c => ({ connectionId: c.id, status: "pending" as SendStatus })))
 
-    setSending(true)
-    setResults(connections.map(c => ({ connectionId: c.id, status: "pending" })))
+      for (let i = 0; i < connections.length; i++) {
+        const connection = connections[i]
 
-    for (let i = 0; i < connections.length; i++) {
-      const connection = connections[i]
-
-      setResults(prev =>
-        prev.map(r =>
-          r.connectionId === connection.id ? { ...r, status: "sending" } : r
-        )
-      )
-
-      try {
-        const res = await fetch("/api/linkedin/message", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            recipientId: connection.id,
-            message: message.trim(),
-          }),
-        })
-
-        if (res.ok) {
-          setResults(prev =>
-            prev.map(r =>
-              r.connectionId === connection.id ? { ...r, status: "success" } : r
-            )
+        setResults(prev =>
+          prev.map(r =>
+            r.connectionId === connection.id ? { ...r, status: "sending" as SendStatus } : r
           )
-        } else {
-          const data = await res.json()
+        )
+
+        try {
+          const res = await fetch("/api/linkedin/message", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              recipientId: connection.id,
+              message: message.trim(),
+            }),
+          })
+
+          if (res.ok) {
+            setResults(prev =>
+              prev.map(r =>
+                r.connectionId === connection.id ? { ...r, status: "success" as SendStatus } : r
+              )
+            )
+          } else {
+            const data = await res.json()
+            setResults(prev =>
+              prev.map(r =>
+                r.connectionId === connection.id
+                  ? { ...r, status: "error" as SendStatus, error: data.error }
+                  : r
+              )
+            )
+          }
+        } catch {
           setResults(prev =>
             prev.map(r =>
               r.connectionId === connection.id
-                ? { ...r, status: "error", error: data.error }
+                ? { ...r, status: "error" as SendStatus, error: "Network error" }
                 : r
             )
           )
         }
-      } catch {
-        setResults(prev =>
-          prev.map(r =>
-            r.connectionId === connection.id
-              ? { ...r, status: "error", error: "Network error" }
-              : r
-          )
-        )
-      }
 
-      setProgress(((i + 1) / connections.length) * 100)
+        setProgress(((i + 1) / connections.length) * 100)
 
-      // Small delay between messages to avoid rate limiting
-      if (i < connections.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000))
+        // Small delay between messages to avoid rate limiting
+        if (i < connections.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        }
       }
+    },
+  })
+
+  const handleOpen = (isOpen: boolean) => {
+    if (isOpen) {
+      setMessage("")
+      setResults([])
+      setProgress(0)
     }
+    onOpenChange(isOpen)
+  }
 
-    setSending(false)
+  const handleSend = () => {
+    if (!message.trim() || connections.length === 0) return
+    bulkSendMutation.mutate({ connections, message })
   }
 
   const getStatusIcon = (status: SendStatus) => {
@@ -175,7 +175,7 @@ export function BulkMessageDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpen}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
@@ -210,7 +210,7 @@ export function BulkMessageDialog({
           </div>
 
           {/* Templates section */}
-          {templates.length > 0 && !sending && (
+          {templates.length > 0 && !bulkSendMutation.isPending && (
             <div>
               <Button
                 variant="ghost"
@@ -256,7 +256,7 @@ export function BulkMessageDialog({
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               className="min-h-[150px]"
-              disabled={sending}
+              disabled={bulkSendMutation.isPending}
             />
             <p className={cn("text-xs mt-1", getCharCountColor())}>
               {charCount} / 1000 characters
@@ -265,7 +265,7 @@ export function BulkMessageDialog({
           </div>
 
           {/* Progress bar */}
-          {sending && (
+          {bulkSendMutation.isPending && (
             <div className="space-y-2">
               <Progress value={progress} />
               <p className="text-sm text-muted-foreground text-center">
@@ -297,15 +297,15 @@ export function BulkMessageDialog({
                 <Button
                   variant="outline"
                   onClick={() => onOpenChange(false)}
-                  disabled={sending}
+                  disabled={bulkSendMutation.isPending}
                 >
                   Cancel
                 </Button>
                 <Button
                   onClick={handleSend}
-                  disabled={sending || !message.trim() || charCount > 1000}
+                  disabled={bulkSendMutation.isPending || !message.trim() || charCount > 1000}
                 >
-                  {sending ? (
+                  {bulkSendMutation.isPending ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                       Sending...

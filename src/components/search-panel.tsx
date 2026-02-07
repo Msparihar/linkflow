@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useQuery, useMutation } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -52,37 +53,64 @@ const DEFAULT_INVITE_TEMPLATE = `Hi {{firstName}}, I came across your profile an
 
 export function SearchPanel() {
   const [searchQuery, setSearchQuery] = useState("")
-  const [profiles, setProfiles] = useState<Profile[]>([])
-  const [loading, setLoading] = useState(false)
-  const [hasSearched, setHasSearched] = useState(false)
-
-  // Templates state
-  const [templates, setTemplates] = useState<Template[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("default")
 
   // Invite dialog state
   const [selectedProfile, setSelectedProfile] = useState<Profile | null>(null)
   const [inviteMessage, setInviteMessage] = useState("")
-  const [sendingInvite, setSendingInvite] = useState(false)
   const [inviteStatus, setInviteStatus] = useState<"idle" | "success" | "error">("idle")
   const [inviteError, setInviteError] = useState("")
   const [sentInvites, setSentInvites] = useState<Set<string>>(new Set())
 
-  // Fetch templates on mount
-  useEffect(() => {
-    const fetchTemplates = async () => {
-      try {
-        const res = await fetch("/api/templates")
-        if (res.ok) {
-          const data = await res.json()
-          setTemplates(data.templates || [])
-        }
-      } catch (error) {
-        console.error("Failed to fetch templates:", error)
+  const { data: templates = [] } = useQuery({
+    queryKey: ["templates"],
+    queryFn: async () => {
+      const res = await fetch("/api/templates")
+      if (!res.ok) throw new Error("Failed to fetch templates")
+      const data = await res.json()
+      return (data.templates || []) as Template[]
+    },
+  })
+
+  const searchMutation = useMutation({
+    mutationFn: async (query: string) => {
+      const res = await fetch(`/api/linkedin/search?q=${encodeURIComponent(query)}&limit=20`)
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Search failed")
       }
-    }
-    fetchTemplates()
-  }, [])
+      const data = await res.json()
+      return (data.profiles || []) as Profile[]
+    },
+  })
+
+  const inviteMutation = useMutation({
+    mutationFn: async ({ profileId, message }: { profileId: string; message?: string }) => {
+      const res = await fetch("/api/linkedin/invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId, message }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to send connection request")
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      setInviteStatus("success")
+      if (selectedProfile) {
+        setSentInvites((prev) => new Set(prev).add(selectedProfile.id))
+      }
+      setTimeout(() => {
+        handleCloseInviteDialog()
+      }, 2000)
+    },
+    onError: (error: Error) => {
+      setInviteStatus("error")
+      setInviteError(error.message)
+    },
+  })
 
   // Helper to replace placeholders in template
   const applyTemplate = (template: string, profile: Profile) => {
@@ -94,28 +122,9 @@ export function SearchPanel() {
       .replace(/\{\{location\}\}/g, profile.location || "")
   }
 
-  const handleSearch = async () => {
+  const handleSearch = () => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) return
-
-    setLoading(true)
-    setHasSearched(true)
-
-    try {
-      const res = await fetch(`/api/linkedin/search?q=${encodeURIComponent(searchQuery.trim())}&limit=20`)
-      if (res.ok) {
-        const data = await res.json()
-        setProfiles(data.profiles || [])
-      } else {
-        const data = await res.json()
-        console.error("Search failed:", data.error)
-        setProfiles([])
-      }
-    } catch (error) {
-      console.error("Search error:", error)
-      setProfiles([])
-    } finally {
-      setLoading(false)
-    }
+    searchMutation.mutate(searchQuery.trim())
   }
 
   const handleOpenInviteDialog = (profile: Profile) => {
@@ -146,40 +155,14 @@ export function SearchPanel() {
     setInviteError("")
   }
 
-  const handleSendInvite = async () => {
+  const handleSendInvite = () => {
     if (!selectedProfile) return
-
-    setSendingInvite(true)
     setInviteStatus("idle")
     setInviteError("")
-
-    try {
-      const res = await fetch("/api/linkedin/invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          profileId: selectedProfile.id,
-          message: inviteMessage.trim() || undefined,
-        }),
-      })
-
-      if (res.ok) {
-        setInviteStatus("success")
-        setSentInvites((prev) => new Set(prev).add(selectedProfile.id))
-        setTimeout(() => {
-          handleCloseInviteDialog()
-        }, 2000)
-      } else {
-        const data = await res.json()
-        setInviteStatus("error")
-        setInviteError(data.error || "Failed to send connection request")
-      }
-    } catch {
-      setInviteStatus("error")
-      setInviteError("Network error. Please try again.")
-    } finally {
-      setSendingInvite(false)
-    }
+    inviteMutation.mutate({
+      profileId: selectedProfile.id,
+      message: inviteMessage.trim() || undefined,
+    })
   }
 
   const getConnectionBadge = (degree?: number) => {
@@ -189,6 +172,9 @@ export function SearchPanel() {
     if (degree === 3) return <span className="text-xs bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full">3rd+</span>
     return null
   }
+
+  const profiles = searchMutation.data || []
+  const hasSearched = searchMutation.isSuccess || searchMutation.isError
 
   return (
     <div className="space-y-6">
@@ -211,13 +197,13 @@ export function SearchPanel() {
             className="pl-10"
           />
         </div>
-        <Button onClick={handleSearch} disabled={loading || searchQuery.trim().length < 2}>
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Search"}
+        <Button onClick={handleSearch} disabled={searchMutation.isPending || searchQuery.trim().length < 2}>
+          {searchMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Search"}
         </Button>
       </div>
 
       {/* Results */}
-      {loading ? (
+      {searchMutation.isPending ? (
         <div className="flex items-center justify-center h-64">
           <Loader2 className="w-8 h-8 animate-spin text-primary" />
         </div>
@@ -354,7 +340,7 @@ export function SearchPanel() {
                 <Select
                   value={selectedTemplateId}
                   onValueChange={handleTemplateChange}
-                  disabled={sendingInvite || inviteStatus === "success"}
+                  disabled={inviteMutation.isPending || inviteStatus === "success"}
                 >
                   <SelectTrigger className="mt-2">
                     <SelectValue placeholder="Select a template" />
@@ -383,7 +369,7 @@ export function SearchPanel() {
                     inviteMessage.length > 300 && "border-destructive"
                   )}
                   rows={4}
-                  disabled={sendingInvite || inviteStatus === "success"}
+                  disabled={inviteMutation.isPending || inviteStatus === "success"}
                 />
                 <div className="flex justify-between mt-1">
                   <p className="text-xs text-muted-foreground">
@@ -403,15 +389,15 @@ export function SearchPanel() {
               <Button
                 variant="outline"
                 onClick={handleCloseInviteDialog}
-                disabled={sendingInvite}
+                disabled={inviteMutation.isPending}
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleSendInvite}
-                disabled={sendingInvite || inviteMessage.length > 300 || inviteStatus === "success"}
+                disabled={inviteMutation.isPending || inviteMessage.length > 300 || inviteStatus === "success"}
               >
-                {sendingInvite ? (
+                {inviteMutation.isPending ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Sending...

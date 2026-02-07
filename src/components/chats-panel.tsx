@@ -2,12 +2,14 @@
 
 import { useState, useEffect, useRef } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { useInfiniteQuery, useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, MessageSquare, Send, ArrowLeft, Check, CheckCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { AiMessageWriter } from "@/components/ai-message-writer"
 
 interface Chat {
   id: string
@@ -33,20 +35,84 @@ interface Message {
 }
 
 export function ChatsPanel() {
-  const [chats, setChats] = useState<Chat[]>([])
-  const [messages, setMessages] = useState<Message[]>([])
+  const queryClient = useQueryClient()
   const [selectedChat, setSelectedChat] = useState<Chat | null>(null)
-  const [loadingChats, setLoadingChats] = useState(true)
-  const [loadingMessages, setLoadingMessages] = useState(false)
   const [newMessage, setNewMessage] = useState("")
-  const [sending, setSending] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const loadMoreRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
 
+  // Infinite query for chat list
+  const {
+    data: chatsData,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+    isLoading: loadingChats,
+  } = useInfiniteQuery({
+    queryKey: ["chats"],
+    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
+      const params = new URLSearchParams({ limit: "20" })
+      if (pageParam) params.set("cursor", pageParam)
+      const res = await fetch(`/api/linkedin/chats?${params}`)
+      if (!res.ok) throw new Error("Failed to fetch chats")
+      return res.json() as Promise<{ chats: Chat[]; cursor?: string }>
+    },
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.cursor || undefined,
+  })
+
+  const chats = chatsData?.pages.flatMap(p => p.chats) || []
+
+  // Messages query — enabled only when a chat is selected
+  const { data: messages = [], isLoading: loadingMessages } = useQuery({
+    queryKey: ["messages", selectedChat?.id],
+    queryFn: async () => {
+      const res = await fetch(`/api/linkedin/chats/${selectedChat!.id}/messages?limit=100`)
+      if (!res.ok) throw new Error("Failed to fetch messages")
+      const data = await res.json()
+      return ((data.messages || []) as Message[]).reverse()
+    },
+    enabled: !!selectedChat,
+  })
+
+  // Send message mutation
+  const sendMutation = useMutation({
+    mutationFn: async ({ chatId, message }: { chatId: string; message: string }) => {
+      const res = await fetch("/api/linkedin/message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId, message }),
+      })
+      if (!res.ok) throw new Error("Failed to send message")
+      return res.json()
+    },
+    onSuccess: () => {
+      setNewMessage("")
+      if (selectedChat) {
+        queryClient.invalidateQueries({ queryKey: ["messages", selectedChat.id] })
+      }
+    },
+  })
+
+  // Infinite scroll: observe the sentinel at bottom of chat list
   useEffect(() => {
-    fetchChats()
-  }, [])
+    const el = loadMoreRef.current
+    if (!el) return
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage()
+        }
+      },
+      { threshold: 0.1 }
+    )
+
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [hasNextPage, isFetchingNextPage, selectedChat, fetchNextPage])
 
   // Handle chat selection from URL query param
   useEffect(() => {
@@ -72,68 +138,12 @@ export function ChatsPanel() {
   }
 
   useEffect(() => {
-    if (selectedChat) {
-      fetchMessages(selectedChat.id)
-    }
-  }, [selectedChat])
-
-  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const fetchChats = async () => {
-    try {
-      const res = await fetch("/api/linkedin/chats?limit=50")
-      if (res.ok) {
-        const data = await res.json()
-        setChats(data.chats || [])
-      }
-    } catch (error) {
-      console.error("Failed to fetch chats:", error)
-    } finally {
-      setLoadingChats(false)
-    }
-  }
-
-  const fetchMessages = async (chatId: string) => {
-    setLoadingMessages(true)
-    try {
-      const res = await fetch(`/api/linkedin/chats/${chatId}/messages?limit=100`)
-      if (res.ok) {
-        const data = await res.json()
-        setMessages((data.messages || []).reverse())
-      }
-    } catch (error) {
-      console.error("Failed to fetch messages:", error)
-    } finally {
-      setLoadingMessages(false)
-    }
-  }
-
-  const handleSendMessage = async () => {
+  const handleSendMessage = () => {
     if (!newMessage.trim() || !selectedChat) return
-
-    setSending(true)
-    try {
-      const res = await fetch("/api/linkedin/message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chatId: selectedChat.id,
-          message: newMessage.trim(),
-        }),
-      })
-
-      if (res.ok) {
-        setNewMessage("")
-        // Refresh messages
-        fetchMessages(selectedChat.id)
-      }
-    } catch (error) {
-      console.error("Failed to send message:", error)
-    } finally {
-      setSending(false)
-    }
+    sendMutation.mutate({ chatId: selectedChat.id, message: newMessage.trim() })
   }
 
   const formatTime = (timestamp: string) => {
@@ -163,8 +173,8 @@ export function ChatsPanel() {
   // Chat list view
   if (!selectedChat) {
     return (
-      <div className="space-y-6">
-        <div className="space-y-1">
+      <div data-fill-height className="flex flex-col flex-1 min-h-0">
+        <div className="space-y-1 shrink-0 pb-6">
           <h1 className="text-2xl font-bold tracking-tight">Messages</h1>
           <p className="text-sm text-muted-foreground">
             {chats.length} conversation{chats.length !== 1 ? 's' : ''}
@@ -182,53 +192,64 @@ export function ChatsPanel() {
             </p>
           </div>
         ) : (
-          <div className="bg-card rounded-xl shadow-sm border border-border overflow-hidden divide-y divide-border">
-            {chats.map((chat, index) => {
-              const otherAttendee = chat.attendees?.find((a) => !a.is_me) || chat.attendees?.[0]
-              return (
-                <div
-                  key={chat.id}
-                  className={cn(
-                    "flex items-center gap-4 p-4 hover:bg-muted/50 cursor-pointer transition-colors",
-                    chat.unreadCount > 0 && "bg-accent/30"
-                  )}
-                  onClick={() => handleSelectChat(chat)}
-                >
-                  <div className="relative">
-                    <Avatar className="w-12 h-12 ring-2 ring-transparent hover:ring-primary/50 transition-all">
-                      <AvatarImage src={otherAttendee?.profile_picture_url} />
-                      <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                        {(chat.name || otherAttendee?.name || "?").charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    {chat.unreadCount > 0 && (
-                      <div className="absolute -top-1 -right-1 w-5 h-5 bg-primary text-primary-foreground text-xs font-bold rounded-full flex items-center justify-center">
-                        {chat.unreadCount > 9 ? '9+' : chat.unreadCount}
-                      </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="bg-card rounded-xl shadow-sm border border-border overflow-hidden divide-y divide-border">
+              {chats.map((chat) => {
+                const otherAttendee = chat.attendees?.find((a) => !a.is_me) || chat.attendees?.[0]
+                return (
+                  <div
+                    key={chat.id}
+                    className={cn(
+                      "flex items-center gap-4 p-4 hover:bg-muted/50 cursor-pointer transition-colors",
+                      chat.unreadCount > 0 && "bg-accent/30"
                     )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <h3 className={cn(
-                        "font-medium truncate",
-                        chat.unreadCount > 0 && "font-semibold"
-                      )}>
-                        {chat.name || otherAttendee?.name || "Unknown"}
-                      </h3>
-                      <span className="text-xs text-muted-foreground flex-shrink-0">
-                        {chat.lastMessageAt && formatTime(chat.lastMessageAt)}
-                      </span>
+                    onClick={() => handleSelectChat(chat)}
+                  >
+                    <div className="relative">
+                      <Avatar className="w-12 h-12 ring-2 ring-transparent hover:ring-primary/50 transition-all">
+                        <AvatarImage src={otherAttendee?.profile_picture_url} />
+                        <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                          {(chat.name || otherAttendee?.name || "?").charAt(0)}
+                        </AvatarFallback>
+                      </Avatar>
+                      {chat.unreadCount > 0 && (
+                        <div className="absolute -top-1 -right-1 w-5 h-5 bg-primary text-primary-foreground text-xs font-bold rounded-full flex items-center justify-center">
+                          {chat.unreadCount > 9 ? '9+' : chat.unreadCount}
+                        </div>
+                      )}
                     </div>
-                    <p className={cn(
-                      "text-sm truncate mt-0.5",
-                      chat.unreadCount > 0 ? "text-foreground" : "text-muted-foreground"
-                    )}>
-                      {chat.lastMessage || "No messages"}
-                    </p>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className={cn(
+                          "font-medium truncate",
+                          chat.unreadCount > 0 && "font-semibold"
+                        )}>
+                          {chat.name || otherAttendee?.name || "Unknown"}
+                        </h3>
+                        <span className="text-xs text-muted-foreground flex-shrink-0">
+                          {chat.lastMessageAt && formatTime(chat.lastMessageAt)}
+                        </span>
+                      </div>
+                      <p className={cn(
+                        "text-sm truncate mt-0.5",
+                        chat.unreadCount > 0 ? "text-foreground" : "text-muted-foreground"
+                      )}>
+                        {chat.lastMessage || "No messages"}
+                      </p>
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                )
+              })}
+            </div>
+
+            {/* Infinite scroll sentinel */}
+            {hasNextPage && (
+              <div ref={loadMoreRef} className="flex justify-center py-4">
+                {isFetchingNextPage && (
+                  <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -239,7 +260,7 @@ export function ChatsPanel() {
   const otherAttendee = selectedChat.attendees?.find((a) => !a.is_me) || selectedChat.attendees?.[0]
 
   return (
-    <div className="flex flex-col h-[calc(100vh-6rem)] bg-card rounded-xl shadow-sm border border-border overflow-hidden">
+    <div data-fill-height className="flex flex-col flex-1 min-h-0 bg-card rounded-xl shadow-sm border border-border overflow-hidden">
       {/* Chat header */}
       <div className="flex items-center gap-3 p-4 border-b border-border bg-card">
         <Button
@@ -265,7 +286,7 @@ export function ChatsPanel() {
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1 px-4">
+      <ScrollArea className="flex-1 min-h-0 px-4">
         {loadingMessages ? (
           <div className="flex items-center justify-center h-32">
             <Loader2 className="w-6 h-6 animate-spin text-primary" />
@@ -326,24 +347,35 @@ export function ChatsPanel() {
 
       {/* Message input */}
       <div className="p-4 border-t border-border bg-card">
-        <div className="flex gap-3 items-end">
-          <Input
+        <div className="flex gap-2 items-end">
+          <AiMessageWriter
+            messages={messages}
+            contactName={selectedChat.name || otherAttendee?.name || ""}
+            onInsert={(text) => setNewMessage(text)}
+          />
+          <Textarea
             value={newMessage}
             onChange={(e) => setNewMessage(e.target.value)}
             placeholder="Type a message..."
-            onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
-            className="flex-1 min-h-[44px] bg-muted border-0 focus-visible:ring-1"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault()
+                handleSendMessage()
+              }
+            }}
+            rows={1}
+            className="flex-1 min-h-[44px] max-h-[140px] resize-none bg-muted border-0 focus-visible:ring-1 py-2.5 field-sizing-content"
           />
           <Button
             onClick={handleSendMessage}
-            disabled={sending || !newMessage.trim()}
+            disabled={sendMutation.isPending || !newMessage.trim()}
             size="icon"
             className={cn(
               "h-11 w-11 rounded-full shadow-md transition-all",
               newMessage.trim() ? "bg-primary hover:bg-primary-hover" : "bg-muted text-muted-foreground"
             )}
           >
-            {sending ? (
+            {sendMutation.isPending ? (
               <Loader2 className="w-5 h-5 animate-spin" />
             ) : (
               <Send className="w-5 h-5" />

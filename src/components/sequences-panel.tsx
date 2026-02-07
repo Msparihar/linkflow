@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -103,9 +104,7 @@ interface Sequence {
 }
 
 export function SequencesPanel() {
-  const [sequences, setSequences] = useState<Sequence[]>([])
-  const [loading, setLoading] = useState(true)
-  const [templates, setTemplates] = useState<Template[]>([])
+  const queryClient = useQueryClient()
 
   // Dialog states
   const [showCreateDialog, setShowCreateDialog] = useState(false)
@@ -124,63 +123,172 @@ export function SequencesPanel() {
   const [formDailyLimit, setFormDailyLimit] = useState(30)
   const [formDelayMin, setFormDelayMin] = useState(5)
   const [formDelayMax, setFormDelayMax] = useState(15)
-  const [saving, setSaving] = useState(false)
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("")
   const [searchResults, setSearchResults] = useState<Profile[]>([])
-  const [searching, setSearching] = useState(false)
 
   // Action states
   const [executingId, setExecutingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchSequences()
-    fetchTemplates()
-  }, [])
-
-  const fetchSequences = async () => {
-    try {
+  const { data: sequences = [], isLoading } = useQuery({
+    queryKey: ["sequences"],
+    queryFn: async () => {
       const res = await fetch("/api/sequences")
-      if (res.ok) {
-        const data = await res.json()
-        setSequences(data.sequences || [])
-      }
-    } catch (error) {
-      console.error("Failed to fetch sequences:", error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      if (!res.ok) throw new Error("Failed to fetch sequences")
+      const data = await res.json()
+      return (data.sequences || []) as Sequence[]
+    },
+  })
 
-  const fetchTemplates = async () => {
-    try {
+  const { data: templates = [] } = useQuery({
+    queryKey: ["templates"],
+    queryFn: async () => {
       const res = await fetch("/api/templates")
-      if (res.ok) {
-        const data = await res.json()
-        setTemplates(data.templates || [])
-      }
-    } catch (error) {
-      console.error("Failed to fetch templates:", error)
-    }
-  }
+      if (!res.ok) throw new Error("Failed to fetch templates")
+      const data = await res.json()
+      return (data.templates || []) as Template[]
+    },
+  })
 
-  const handleSearch = async () => {
+  const searchMutation = useMutation({
+    mutationFn: async (query: string) => {
+      const res = await fetch(`/api/linkedin/search?q=${encodeURIComponent(query)}&limit=20`)
+      if (!res.ok) throw new Error("Search failed")
+      const data = await res.json()
+      return (data.profiles || []) as Profile[]
+    },
+    onSuccess: (data) => {
+      setSearchResults(data)
+    },
+  })
+
+  const createMutation = useMutation({
+    mutationFn: async (payload: Record<string, unknown>) => {
+      const res = await fetch("/api/sequences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to create sequence")
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sequences"] })
+      setShowCreateDialog(false)
+      resetForm()
+    },
+    onError: (error: Error) => {
+      setError(error.message)
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: Record<string, unknown> }) => {
+      const res = await fetch(`/api/sequences/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to update sequence")
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sequences"] })
+      setShowCreateDialog(false)
+      resetForm()
+    },
+    onError: (error: Error) => {
+      setError(error.message)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/sequences/${id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to delete sequence")
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sequences"] })
+    },
+    onError: (error: Error) => {
+      setError(error.message)
+    },
+    onSettled: () => {
+      setDeleteSequenceId(null)
+    },
+  })
+
+  const startMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/sequences/${id}/start`, { method: "POST" })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to start sequence")
+      }
+      return res.json()
+    },
+    onMutate: (id) => { setExecutingId(id) },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sequences"] })
+    },
+    onError: (error: Error) => {
+      setError(error.message)
+    },
+    onSettled: () => { setExecutingId(null) },
+  })
+
+  const pauseMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/sequences/${id}/pause`, { method: "POST" })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to pause sequence")
+      }
+      return res.json()
+    },
+    onMutate: (id) => { setExecutingId(id) },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sequences"] })
+    },
+    onError: (error: Error) => {
+      setError(error.message)
+    },
+    onSettled: () => { setExecutingId(null) },
+  })
+
+  const executeMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/sequences/${id}/execute`, { method: "POST" })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || "Failed to execute sequence")
+      }
+      return res.json()
+    },
+    onMutate: (id) => { setExecutingId(id) },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sequences"] })
+    },
+    onError: (error: Error) => {
+      setError(error.message)
+    },
+    onSettled: () => { setExecutingId(null) },
+  })
+
+  const handleSearch = () => {
     if (!searchQuery.trim() || searchQuery.length < 2) return
-
-    setSearching(true)
-    try {
-      const res = await fetch(`/api/linkedin/search?q=${encodeURIComponent(searchQuery)}&limit=20`)
-      if (res.ok) {
-        const data = await res.json()
-        setSearchResults(data.profiles || [])
-      }
-    } catch (error) {
-      console.error("Search failed:", error)
-    } finally {
-      setSearching(false)
-    }
+    searchMutation.mutate(searchQuery.trim())
   }
 
   const handleAddTarget = (profile: Profile) => {
@@ -229,167 +337,26 @@ export function SequencesPanel() {
     setSelectedSequence(null)
   }
 
-  const handleCreateSequence = async () => {
+  const getFormPayload = () => ({
+    name: formName,
+    description: formDescription,
+    targetProfiles: formTargets,
+    steps: formSteps,
+    dailyLimit: formDailyLimit,
+    delayMinMinutes: formDelayMin,
+    delayMaxMinutes: formDelayMax,
+  })
+
+  const handleCreateSequence = () => {
     if (!formName.trim()) return
-
-    setSaving(true)
     setError(null)
-    try {
-      const res = await fetch("/api/sequences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formName,
-          description: formDescription,
-          targetProfiles: formTargets,
-          steps: formSteps,
-          dailyLimit: formDailyLimit,
-          delayMinMinutes: formDelayMin,
-          delayMaxMinutes: formDelayMax
-        })
-      })
-
-      if (res.ok) {
-        await fetchSequences()
-        setShowCreateDialog(false)
-        resetForm()
-      } else {
-        const data = await res.json()
-        setError(data.error || "Failed to create sequence")
-      }
-    } catch (error) {
-      console.error("Failed to create sequence:", error)
-      setError("Failed to create sequence. Please try again.")
-    } finally {
-      setSaving(false)
-    }
+    createMutation.mutate(getFormPayload())
   }
 
-  const handleUpdateSequence = async () => {
+  const handleUpdateSequence = () => {
     if (!selectedSequence || !formName.trim()) return
-
-    setSaving(true)
     setError(null)
-    try {
-      const res = await fetch(`/api/sequences/${selectedSequence.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formName,
-          description: formDescription,
-          targetProfiles: formTargets,
-          steps: formSteps,
-          dailyLimit: formDailyLimit,
-          delayMinMinutes: formDelayMin,
-          delayMaxMinutes: formDelayMax
-        })
-      })
-
-      if (res.ok) {
-        await fetchSequences()
-        setShowCreateDialog(false)
-        resetForm()
-      } else {
-        const data = await res.json()
-        setError(data.error || "Failed to update sequence")
-      }
-    } catch (error) {
-      console.error("Failed to update sequence:", error)
-      setError("Failed to update sequence. Please try again.")
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleDeleteSequence = async () => {
-    if (!deleteSequenceId) return
-
-    setError(null)
-    try {
-      const res = await fetch(`/api/sequences/${deleteSequenceId}`, {
-        method: "DELETE"
-      })
-
-      if (res.ok) {
-        await fetchSequences()
-      } else {
-        const data = await res.json()
-        setError(data.error || "Failed to delete sequence")
-      }
-    } catch (error) {
-      console.error("Failed to delete sequence:", error)
-      setError("Failed to delete sequence. Please try again.")
-    } finally {
-      setDeleteSequenceId(null)
-    }
-  }
-
-  const handleStartSequence = async (sequenceId: string) => {
-    setExecutingId(sequenceId)
-    setError(null)
-    try {
-      const res = await fetch(`/api/sequences/${sequenceId}/start`, {
-        method: "POST"
-      })
-
-      if (res.ok) {
-        await fetchSequences()
-      } else {
-        const data = await res.json()
-        setError(data.error || "Failed to start sequence")
-      }
-    } catch (error) {
-      console.error("Failed to start sequence:", error)
-      setError("Failed to start sequence. Please try again.")
-    } finally {
-      setExecutingId(null)
-    }
-  }
-
-  const handlePauseSequence = async (sequenceId: string) => {
-    setExecutingId(sequenceId)
-    setError(null)
-    try {
-      const res = await fetch(`/api/sequences/${sequenceId}/pause`, {
-        method: "POST"
-      })
-
-      if (res.ok) {
-        await fetchSequences()
-      } else {
-        const data = await res.json()
-        setError(data.error || "Failed to pause sequence")
-      }
-    } catch (error) {
-      console.error("Failed to pause sequence:", error)
-      setError("Failed to pause sequence. Please try again.")
-    } finally {
-      setExecutingId(null)
-    }
-  }
-
-  const handleExecuteSequence = async (sequenceId: string) => {
-    setExecutingId(sequenceId)
-    setError(null)
-    try {
-      const res = await fetch(`/api/sequences/${sequenceId}/execute`, {
-        method: "POST"
-      })
-
-      if (res.ok) {
-        const data = await res.json()
-        console.log("Execution result:", data)
-        await fetchSequences()
-      } else {
-        const data = await res.json()
-        setError(data.error || "Failed to execute sequence")
-      }
-    } catch (error) {
-      console.error("Failed to execute sequence:", error)
-      setError("Failed to execute sequence. Please try again.")
-    } finally {
-      setExecutingId(null)
-    }
+    updateMutation.mutate({ id: selectedSequence.id, payload: getFormPayload() })
   }
 
   const openEditDialog = (sequence: Sequence) => {
@@ -419,7 +386,9 @@ export function SequencesPanel() {
     }
   }
 
-  if (loading) {
+  const saving = createMutation.isPending || updateMutation.isPending
+
+  if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -505,7 +474,7 @@ export function SequencesPanel() {
                   {sequence.status === "draft" || sequence.status === "paused" ? (
                     <Button
                       size="sm"
-                      onClick={() => handleStartSequence(sequence.id)}
+                      onClick={() => startMutation.mutate(sequence.id)}
                       disabled={executingId === sequence.id || sequence.totalTargets === 0}
                     >
                       {executingId === sequence.id ? (
@@ -522,7 +491,7 @@ export function SequencesPanel() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleExecuteSequence(sequence.id)}
+                        onClick={() => executeMutation.mutate(sequence.id)}
                         disabled={executingId === sequence.id}
                       >
                         {executingId === sequence.id ? (
@@ -537,7 +506,7 @@ export function SequencesPanel() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handlePauseSequence(sequence.id)}
+                        onClick={() => pauseMutation.mutate(sequence.id)}
                         disabled={executingId === sequence.id}
                       >
                         <Pause className="w-4 h-4 mr-1" />
@@ -903,8 +872,8 @@ export function SequencesPanel() {
                 placeholder="Search by name, title, company..."
                 onKeyDown={(e) => e.key === "Enter" && handleSearch()}
               />
-              <Button onClick={handleSearch} disabled={searching}>
-                {searching ? (
+              <Button onClick={handleSearch} disabled={searchMutation.isPending}>
+                {searchMutation.isPending ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <Search className="w-4 h-4" />
@@ -987,7 +956,7 @@ export function SequencesPanel() {
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleDeleteSequence}
+              onClick={() => deleteSequenceId && deleteMutation.mutate(deleteSequenceId)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
