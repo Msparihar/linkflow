@@ -14,9 +14,8 @@ export function LoginPage() {
   const [error, setError] = useState("")
   const [isRegister, setIsRegister] = useState(false)
 
-  // Prefilled for testing
-  const [email, setEmail] = useState("test@example.com")
-  const [password, setPassword] = useState("password123")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
