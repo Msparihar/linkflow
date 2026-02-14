@@ -138,7 +138,7 @@ export function LinkedinConnectPrompt() {
         return
       }
 
-      if (data.object === 'AccountCreated') {
+      if (data.object === 'AccountCreated' || data.object === 'AccountReconnected') {
         setAccountId(data.account_id)
         await saveSession(data.account_id)
       } else if (data.object === 'Checkpoint') {

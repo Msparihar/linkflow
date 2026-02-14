@@ -17,3 +17,29 @@ export function getUnipileClient(): UnipileClient {
 
   return client;
 }
+
+/**
+ * Find an existing Unipile LinkedIn account by LinkedIn username/email.
+ * Returns the account ID if found, null otherwise.
+ */
+export async function findExistingLinkedinAccount(username: string): Promise<string | null> {
+  const client = getUnipileClient();
+  let cursor: string | undefined;
+
+  do {
+    const response = await client.account.getAll(cursor ? { cursor } : undefined);
+
+    for (const account of response.items) {
+      if (
+        account.type === 'LINKEDIN' &&
+        account.connection_params.im.username.toLowerCase() === username.toLowerCase()
+      ) {
+        return account.id;
+      }
+    }
+
+    cursor = response.cursor ?? undefined;
+  } while (cursor);
+
+  return null;
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { getUnipileClient } from "@/lib/unipile"
+import { prisma } from "@/lib/prisma"
 import {
   getCachedConnections,
   getCachedConnectionsPaginated,
@@ -21,11 +22,25 @@ export async function GET(request: NextRequest) {
   const cursor = searchParams.get("cursor")
   const limit = parseInt(searchParams.get("limit") || "20", 10)
   const fetchAll = searchParams.get("fetchAll") === "true"
+  const force = searchParams.get("force") === "true"
 
   if (unipileAccountId) {
     try {
       // fetchAll — serve from cache, sync in background if stale
       if (fetchAll) {
+        // Force refresh — bypass cache entirely
+        if (force) {
+          await prisma.cachedConnection.deleteMany({
+            where: { accountId: unipileAccountId },
+          })
+          const connections = await syncConnections(unipileAccountId)
+          return NextResponse.json({
+            connections,
+            cursor: null,
+            total: connections.length,
+          })
+        }
+
         const cached = await getCachedConnections(unipileAccountId)
 
         if (cached && !cached.stale) {

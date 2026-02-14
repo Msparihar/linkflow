@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo } from "react"
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query"
+import { useState, useEffect, useMemo } from "react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -22,7 +22,9 @@ import {
   ArrowUpDown,
   CheckSquare,
   X,
-  UserPlus
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
 } from "lucide-react"
 import { ConnectionMessageDialog } from "@/components/connection-message-dialog"
 import { BulkMessageDialog } from "@/components/bulk-message-dialog"
@@ -45,6 +47,8 @@ interface ConnectionsPanelProps {
 export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [sortBy, setSortBy] = useState<SortOption>("name-asc")
+  const [page, setPage] = useState(1)
+  const perPage = 24
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null)
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
@@ -52,71 +56,50 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const queryClient = useQueryClient()
 
-  const observerRef = useRef<IntersectionObserver | null>(null)
-  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const handleRefresh = async () => {
+    setIsRefreshing(true)
+    try {
+      await fetch("/api/linkedin/connections?fetchAll=true&force=true")
+      await queryClient.invalidateQueries({ queryKey: ["connections"] })
+    } finally {
+      setIsRefreshing(false)
+    }
+  }
 
-  // Paginated connections for infinite scroll
-  const {
-    data: paginatedData,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    isLoading,
-  } = useInfiniteQuery({
+  const { data: connections = [], isLoading } = useQuery({
     queryKey: ["connections"],
-    queryFn: async ({ pageParam }: { pageParam: string | null }) => {
-      const params = new URLSearchParams({ limit: "20" })
-      if (pageParam) params.set("cursor", pageParam)
-      const res = await fetch(`/api/linkedin/connections?${params}`)
-      if (!res.ok) throw new Error("Failed to fetch connections")
-      return res.json() as Promise<{ connections: Connection[]; cursor?: string }>
-    },
-    initialPageParam: null as string | null,
-    getNextPageParam: (lastPage) => lastPage.cursor || undefined,
-  })
-
-  // Background fetch of all connections
-  const { data: allConnectionsData, isLoading: loadingAll } = useQuery({
-    queryKey: ["connections-all"],
     queryFn: async () => {
       const res = await fetch("/api/linkedin/connections?fetchAll=true")
-      if (!res.ok) throw new Error("Failed to fetch all connections")
+      if (!res.ok) throw new Error("Failed to fetch connections")
       const data = await res.json()
       return (data.connections || []) as Connection[]
     },
   })
 
-  const allConnections = allConnectionsData || []
-  const paginatedConnections = useMemo(
-    () => paginatedData?.pages.flatMap(p => p.connections) || [],
-    [paginatedData]
-  )
-
-  // Report count when all connections load
+  // Report count when connections load
   useEffect(() => {
-    if (allConnections.length > 0) {
-      onConnectionCountChange?.(allConnections.length)
+    if (connections.length > 0) {
+      onConnectionCountChange?.(connections.length)
     }
-  }, [allConnections.length, onConnectionCountChange])
-
-  const allLoaded = !!allConnectionsData
+  }, [connections.length, onConnectionCountChange])
 
   const filteredConnections = useMemo(() => {
-    const connectionsToSearch = allLoaded ? allConnections : paginatedConnections
-    let result = connectionsToSearch
+    let result = connections
 
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase()
       result = result.filter(
-        (conn) =>
-          conn.firstName.toLowerCase().includes(query) ||
-          conn.lastName.toLowerCase().includes(query) ||
-          conn.headline.toLowerCase().includes(query)
+        (conn) => {
+          const fullName = `${conn.firstName} ${conn.lastName}`.toLowerCase()
+          return fullName.includes(query) ||
+            conn.headline.toLowerCase().includes(query)
+        }
       )
     }
 
-    // Apply sorting
     result = [...result].sort((a, b) => {
       switch (sortBy) {
         case "name-asc":
@@ -125,30 +108,20 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
           return `${b.firstName} ${b.lastName}`.localeCompare(`${a.firstName} ${a.lastName}`)
         case "recent":
         default:
-          return 0 // Keep original order (most recent first from API)
+          return 0
       }
     })
 
     return result
-  }, [searchQuery, paginatedConnections, allConnections, allLoaded, sortBy])
+  }, [searchQuery, connections, sortBy])
 
-  // Intersection observer for infinite scroll
+  // Reset to page 1 when filters change
   useEffect(() => {
-    if (observerRef.current) observerRef.current.disconnect()
+    setPage(1)
+  }, [searchQuery, sortBy])
 
-    observerRef.current = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage && !searchQuery) {
-          fetchNextPage()
-        }
-      },
-      { threshold: 0.1 }
-    )
-
-    if (loadMoreRef.current) observerRef.current.observe(loadMoreRef.current)
-
-    return () => observerRef.current?.disconnect()
-  }, [hasNextPage, isFetchingNextPage, searchQuery, fetchNextPage])
+  const totalPages = Math.ceil(filteredConnections.length / perPage)
+  const paginatedConnections = filteredConnections.slice((page - 1) * perPage, page * perPage)
 
   const toggleSelection = (id: string) => {
     setSelectedIds(prev => {
@@ -185,52 +158,46 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
   }
 
   return (
-    <div className="space-y-6">
+    <div className={cn("space-y-6", selectionMode && "pb-20 md:pb-0")}>
       {/* Header */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold tracking-tight">Connections</h1>
           <p className="text-sm text-muted-foreground">
-            {loadingAll ? (
+            {isLoading ? (
               <span className="flex items-center gap-2">
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 Loading your network...
               </span>
             ) : (
-              <span>{allConnections.length.toLocaleString()} connections in your network</span>
+              <span>{connections.length.toLocaleString()} connections in your network</span>
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {selectionMode ? (
-            <>
-              <span className="text-sm text-muted-foreground font-medium">
-                {selectedIds.size} selected
-              </span>
-              <Button variant="outline" size="sm" onClick={selectAll}>
-                Select All
-              </Button>
-              <Button variant="outline" size="sm" onClick={clearSelection}>
-                <X className="w-4 h-4 mr-1.5" />
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                disabled={selectedIds.size === 0}
-                onClick={() => setIsBulkDialogOpen(true)}
-                className="shadow-sm"
-              >
-                <Send className="w-4 h-4 mr-1.5" />
-                Message ({selectedIds.size})
-              </Button>
-            </>
-          ) : (
-            <Button variant="outline" onClick={() => setSelectionMode(true)} className="shadow-sm">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            className="shadow-sm h-9 w-9 shrink-0"
+            title="Refresh connections"
+          >
+            <RefreshCw className={cn("w-4 h-4", isRefreshing && "animate-spin")} />
+          </Button>
+          {!selectionMode && (
+            <Button variant="outline" onClick={() => setSelectionMode(true)} className="shadow-sm flex-1 sm:flex-initial">
               <CheckSquare className="w-4 h-4 mr-2" />
               Bulk Select
             </Button>
           )}
         </div>
+        {selectionMode && (
+          <Button variant="outline" size="sm" onClick={clearSelection} className="sm:hidden w-full">
+            <X className="w-4 h-4 mr-1.5" />
+            Cancel Selection
+          </Button>
+        )}
       </div>
 
       {/* Search and Sort */}
@@ -279,84 +246,139 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
         </div>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredConnections.map((connection, index) => (
-              <Card
-                key={`${connection.id}-${index}`}
-                className={cn(
-                  "card-hover cursor-pointer group overflow-hidden",
-                  selectedIds.has(connection.id) && "ring-2 ring-primary shadow-md"
-                )}
-                onClick={() => openMessageDialog(connection)}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-start gap-4">
-                    {selectionMode && (
-                      <Checkbox
-                        checked={selectedIds.has(connection.id)}
-                        onCheckedChange={() => toggleSelection(connection.id)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="mt-1"
-                      />
-                    )}
-                    <Avatar className={cn(
-                      "w-14 h-14 flex-shrink-0 ring-2 ring-transparent transition-all duration-200",
-                      "group-hover:ring-primary/50"
-                    )}>
-                      <AvatarImage
-                        src={connection.profilePicture || "/placeholder.svg"}
-                        alt={`${connection.firstName} ${connection.lastName}`}
-                      />
-                      <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                        {connection.firstName.charAt(0)}
-                        {connection.lastName.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-semibold text-base truncate group-hover:text-primary transition-colors">
-                        {connection.firstName} {connection.lastName}
-                      </h3>
-                      <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed mt-0.5">
-                        {connection.headline || "LinkedIn Member"}
-                      </p>
-                    </div>
-                  </div>
-                  {!selectionMode && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="w-full mt-4 opacity-0 group-hover:opacity-100 transition-all duration-200 translate-y-1 group-hover:translate-y-0"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        openMessageDialog(connection)
-                      }}
-                    >
-                      <Send className="w-4 h-4 mr-2" />
-                      Send Message
-                    </Button>
-                  )}
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          {/* Load more */}
-          {!searchQuery && hasNextPage && (
-            <div ref={loadMoreRef} className="flex justify-center py-8">
-              {isFetchingNextPage ? (
-                <div className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="w-5 h-5 animate-spin" />
-                  <span>Loading more...</span>
-                </div>
-              ) : (
-                <Button variant="outline" onClick={() => fetchNextPage()} className="shadow-sm">
-                  <UserPlus className="w-4 h-4 mr-2" />
-                  Load More Connections
-                </Button>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {paginatedConnections.map((connection, index) => (
+            <Card
+              key={`${connection.id}-${index}`}
+              className={cn(
+                "card-hover cursor-pointer group overflow-hidden",
+                selectedIds.has(connection.id) && "ring-2 ring-primary shadow-md"
               )}
+              onClick={() => openMessageDialog(connection)}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-start gap-4">
+                  {selectionMode && (
+                    <Checkbox
+                      checked={selectedIds.has(connection.id)}
+                      onCheckedChange={() => toggleSelection(connection.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-1"
+                    />
+                  )}
+                  <Avatar className={cn(
+                    "w-14 h-14 flex-shrink-0 ring-2 ring-transparent transition-all duration-200",
+                    "group-hover:ring-primary/50"
+                  )}>
+                    <AvatarImage
+                      src={connection.profilePicture ? `/api/proxy-image?url=${encodeURIComponent(connection.profilePicture)}` : undefined}
+                      alt={`${connection.firstName} ${connection.lastName}`}
+                    />
+                    <AvatarFallback className="bg-primary/10 text-primary font-semibold">
+                      {connection.firstName.charAt(0)}
+                      {connection.lastName.charAt(0)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-semibold text-base truncate group-hover:text-primary transition-colors">
+                      {connection.firstName} {connection.lastName}
+                    </h3>
+                    <p className="text-sm text-muted-foreground line-clamp-2 leading-relaxed mt-0.5">
+                      {connection.headline || "LinkedIn Member"}
+                    </p>
+                  </div>
+                </div>
+                {!selectionMode && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="w-full mt-4 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 md:translate-y-1 md:group-hover:translate-y-0"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openMessageDialog(connection)
+                    }}
+                  >
+                    <Send className="w-4 h-4 mr-2" />
+                    Send Message
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-4">
+              <Button
+                variant="outline"
+                size="icon"
+                disabled={page === 1}
+                onClick={() => setPage(p => p - 1)}
+                className="h-9 w-9"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <span className="text-sm text-muted-foreground px-2">
+                {page} / {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="icon"
+                disabled={page === totalPages}
+                onClick={() => setPage(p => p + 1)}
+                className="h-9 w-9"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
             </div>
           )}
         </>
+      )}
+
+      {/* Mobile sticky bulk action bar */}
+      {selectionMode && (
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-card border-t border-border px-4 py-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">{selectedIds.size} selected</span>
+            <Button variant="outline" size="sm" onClick={selectAll}>
+              All
+            </Button>
+          </div>
+          <Button
+            size="sm"
+            disabled={selectedIds.size === 0}
+            onClick={() => setIsBulkDialogOpen(true)}
+          >
+            <Send className="w-4 h-4 mr-1.5" />
+            Message
+          </Button>
+        </div>
+      )}
+
+      {/* Desktop bulk action bar */}
+      {selectionMode && (
+        <div className="hidden md:flex items-center gap-2 sticky top-0 z-10 bg-background/80 backdrop-blur-sm py-2 -mt-2">
+          <span className="text-sm text-muted-foreground font-medium">
+            {selectedIds.size} selected
+          </span>
+          <Button variant="outline" size="sm" onClick={selectAll}>
+            Select All
+          </Button>
+          <Button variant="outline" size="sm" onClick={clearSelection}>
+            <X className="w-4 h-4 mr-1.5" />
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            disabled={selectedIds.size === 0}
+            onClick={() => setIsBulkDialogOpen(true)}
+            className="shadow-sm"
+          >
+            <Send className="w-4 h-4 mr-1.5" />
+            Message ({selectedIds.size})
+          </Button>
+        </div>
       )}
 
       {/* Single message dialog */}

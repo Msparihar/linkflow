@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { prisma } from '@/lib/prisma';
 
 export async function POST() {
   try {
@@ -14,13 +13,8 @@ export async function POST() {
       );
     }
 
-    // Clear unipile account from database
-    await prisma.user.update({
-      where: { id: userId },
-      data: { unipileAccountId: null },
-    });
-
-    // Clear the cookie
+    // Only clear the session cookie — keep unipileAccountId in the DB
+    // so we can reconnect instead of creating a duplicate account.
     cookieStore.delete('unipile_account_id');
 
     return NextResponse.json({ success: true });

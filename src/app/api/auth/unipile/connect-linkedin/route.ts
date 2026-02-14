@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { getUnipileClient } from '@/lib/unipile';
+import { getUnipileClient, findExistingLinkedinAccount } from '@/lib/unipile';
+import { prisma } from '@/lib/prisma';
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,7 +25,20 @@ export async function POST(request: NextRequest) {
     }
 
     const client = getUnipileClient();
-    const result = await client.account.connectLinkedin({ username, password });
+
+    // Check if this user already has a Unipile account to reconnect
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { unipileAccountId: true },
+    });
+
+    // First check user's own account, then check all Unipile accounts by username
+    const existingAccountId =
+      user?.unipileAccountId || (await findExistingLinkedinAccount(username));
+
+    const result = existingAccountId
+      ? await client.account.reconnectLinkedin({ username, password, account_id: existingAccountId })
+      : await client.account.connectLinkedin({ username, password });
 
     return NextResponse.json(result);
   } catch (error: unknown) {
