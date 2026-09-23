@@ -5,9 +5,10 @@ import { buildAuthorizeUrl } from "@/lib/linkedin-pages"
 
 // Starts the official LinkedIn OAuth flow for company page posting
 export async function GET(request: NextRequest) {
+  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
   const cookieStore = await cookies()
   if (!cookieStore.get("user_id")?.value) {
-    return NextResponse.redirect(new URL("/login", request.url))
+    return NextResponse.redirect(new URL("/login", origin))
   }
 
   const state = randomBytes(16).toString("hex")
@@ -19,6 +20,5 @@ export async function GET(request: NextRequest) {
     path: "/",
   })
 
-  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
   return NextResponse.redirect(buildAuthorizeUrl(state, origin))
 }
