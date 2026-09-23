@@ -15,7 +15,8 @@ import {
   Search,
   Zap,
   Briefcase,
-  Sparkles
+  Sparkles,
+  Building2
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -81,6 +82,13 @@ export function Sidebar({
       href: "/dashboard/templates",
       label: "Templates",
       icon: FileText,
+      requiresLinkedin: false
+    },
+    {
+      id: "company",
+      href: "/dashboard/company",
+      label: "Company Page",
+      icon: Building2,
       requiresLinkedin: false
     },
   ]

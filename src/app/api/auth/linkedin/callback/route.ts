@@ -1,58 +1,46 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
+import { exchangeCodeAndSave } from "@/lib/linkedin-pages"
 
+// Callback for the official LinkedIn OAuth flow started at /api/auth/linkedin/start.
+// Saves the token in the DB so server jobs can post to company pages without the browser.
 export async function GET(request: NextRequest) {
+  const origin = process.env.NEXT_PUBLIC_APP_URL || new URL(request.url).origin
+  const back = (params: Record<string, string>) =>
+    NextResponse.redirect(new URL(`/dashboard/company?${new URLSearchParams(params)}`, origin))
+
   const searchParams = request.nextUrl.searchParams
   const code = searchParams.get("code")
   const state = searchParams.get("state")
   const error = searchParams.get("error")
 
+  const cookieStore = await cookies()
+  const userId = cookieStore.get("user_id")?.value
+  const expectedState = cookieStore.get("linkedin_oauth_state")?.value
+  cookieStore.delete("linkedin_oauth_state")
+
+  if (!userId) {
+    return NextResponse.redirect(new URL("/login", origin))
+  }
+
   if (error) {
-    return NextResponse.redirect(new URL("/?error=access_denied", request.url))
+    // unauthorized_scope_error means the LinkedIn app lacks Community Management API access
+    return back({ error, detail: searchParams.get("error_description") || "" })
   }
 
   if (!code) {
-    return NextResponse.redirect(new URL("/?error=no_code", request.url))
+    return back({ error: "no_code" })
+  }
+
+  if (!state || state !== expectedState) {
+    return back({ error: "invalid_state" })
   }
 
   try {
-    // Exchange code for access token
-    const tokenResponse = await fetch("https://www.linkedin.com/oauth/v2/accessToken", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: process.env.LINKEDIN_REDIRECT_URI || `${new URL(request.url).origin}/api/auth/linkedin/callback`,
-        client_id: process.env.LINKEDIN_CLIENT_ID!,
-        client_secret: process.env.LINKEDIN_CLIENT_SECRET!,
-      }),
-    })
-
-    if (!tokenResponse.ok) {
-      const errorData = await tokenResponse.text()
-      console.error("Token exchange failed:", errorData)
-      return NextResponse.redirect(new URL("/?error=token_exchange_failed", request.url))
-    }
-
-    const tokenData = await tokenResponse.json()
-    const accessToken = tokenData.access_token
-
-    // Set the access token in a secure HTTP-only cookie
-    const cookieStore = await cookies()
-    cookieStore.set("linkedin_access_token", accessToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: tokenData.expires_in || 5184000, // Default 60 days
-      path: "/",
-    })
-
-    return NextResponse.redirect(new URL("/dashboard", request.url))
-  } catch (error) {
-    console.error("OAuth callback error:", error)
-    return NextResponse.redirect(new URL("/?error=callback_failed", request.url))
+    await exchangeCodeAndSave(userId, code, origin)
+    return back({ connected: "1" })
+  } catch (err) {
+    console.error("LinkedIn OAuth callback error:", err)
+    return back({ error: "token_exchange_failed" })
   }
 }

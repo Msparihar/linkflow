@@ -19,6 +19,21 @@ model User {
   updatedAt        DateTime @updatedAt
   templates        MessageTemplate[]
   sequences        OutreachSequence[]
+  linkedinPageAuth LinkedinPageAuth?
+}
+
+// LinkedIn OAuth token for posting to company pages (official API, not Unipile)
+model LinkedinPageAuth {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken      String
+  expiresAt        DateTime
+  refreshToken     String?
+  refreshExpiresAt DateTime?
+  scope            String    @default("")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 model MessageTemplate {
