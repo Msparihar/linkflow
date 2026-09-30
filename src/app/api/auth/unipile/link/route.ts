@@ -35,17 +35,34 @@ export async function POST(request: NextRequest) {
       name: userId,
     } as const;
 
-    const response = existingAccountId
-      ? await client.account.createHostedAuthLink({
+    const createLink = () =>
+      client.account.createHostedAuthLink({
+        ...baseParams,
+        type: 'create',
+        providers: ['LINKEDIN'],
+      });
+
+    let response;
+    if (existingAccountId) {
+      try {
+        response = await client.account.createHostedAuthLink({
           ...baseParams,
           type: 'reconnect',
           reconnect_account: existingAccountId,
-        })
-      : await client.account.createHostedAuthLink({
-          ...baseParams,
-          type: 'create',
-          providers: ['LINKEDIN'],
         });
+      } catch (error) {
+        // The saved account no longer exists in this Unipile workspace (deleted, or the
+        // API key moved to another workspace). Forget it and start a fresh connection.
+        console.warn('Reconnect failed, falling back to a new connection:', error);
+        await prisma.user.update({
+          where: { id: userId },
+          data: { unipileAccountId: null },
+        });
+        response = await createLink();
+      }
+    } else {
+      response = await createLink();
+    }
 
     return NextResponse.json({ url: response.url });
   } catch (error) {
