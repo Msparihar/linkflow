@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
+import { DISCONNECTED_COOKIE, forgetLinkedinHealth } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
@@ -28,6 +29,9 @@ export async function POST(request: NextRequest) {
       where: { id: userId },
       data: { unipileAccountId: account_id },
     });
+
+    forgetLinkedinHealth(account_id);
+    cookieStore.delete(DISCONNECTED_COOKIE);
 
     const response = NextResponse.json({ success: true });
 

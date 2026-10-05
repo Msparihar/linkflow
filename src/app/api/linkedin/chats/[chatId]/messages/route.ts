@@ -1,23 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { cookies } from "next/headers"
 import { getUnipileClient } from "@/lib/unipile"
+import { requireLinkedin, unipileError } from "@/lib/session"
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ chatId: string }> }
 ) {
-  const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
+  const session = await requireLinkedin()
+  if (session instanceof NextResponse) return session
+  const { accountId: unipileAccountId } = session
   const { chatId } = await params
-
-  if (!userId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!unipileAccountId) {
-    return NextResponse.json({ error: "LinkedIn not connected" }, { status: 401 })
-  }
 
   const searchParams = request.nextUrl.searchParams
   const cursor = searchParams.get("cursor")
@@ -51,6 +43,6 @@ export async function GET(
     })
   } catch (error) {
     console.error("Messages fetch error:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return unipileError(unipileAccountId, (error as { body?: unknown })?.body, "Couldn't load this conversation. Try again.")
   }
 }

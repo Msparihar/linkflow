@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { apiFetch } from "@/lib/api-client"
+import { ErrorState } from "@/components/error-state"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -69,13 +71,13 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
     }
   }
 
-  const { data: connections = [], isLoading } = useQuery({
+  const { data: connections = [], isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["connections"],
     queryFn: async () => {
-      const res = await fetch("/api/linkedin/connections?fetchAll=true")
-      if (!res.ok) throw new Error("Failed to fetch connections")
-      const data = await res.json()
-      return (data.connections || []) as Connection[]
+      const data = await apiFetch<{ connections?: Connection[] }>(
+        "/api/linkedin/connections?fetchAll=true"
+      )
+      return data.connections || []
     },
   })
 
@@ -230,6 +232,13 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
           <Loader2 className="w-10 h-10 animate-spin text-primary mb-4" />
           <p className="text-muted-foreground">Loading connections...</p>
         </div>
+      ) : isError ? (
+        <ErrorState
+          title="Couldn't load your connections"
+          error={error}
+          onRetry={() => refetch()}
+          retrying={isFetching}
+        />
       ) : filteredConnections.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20">
           <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
@@ -241,7 +250,7 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
           <p className="text-muted-foreground text-center max-w-sm">
             {searchQuery
               ? "Try adjusting your search terms"
-              : "Connect your LinkedIn account to see your network here"}
+              : "People you connect with on LinkedIn show up here"}
           </p>
         </div>
       ) : (

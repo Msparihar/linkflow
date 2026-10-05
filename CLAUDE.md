@@ -9,7 +9,7 @@
 - Prisma ORM with PostgreSQL (migrated from SQLite), schema at prisma/schema.prisma
 - Tailwind CSS v4 + shadcn/ui (new-york style) + Radix primitives + Lucide icons
 - React Query (TanStack) for server data fetching, QueryProvider wraps dashboard layout
-- Bun as package manager (bun.lockb), Dockerfile uses oven/bun for deps + build
+- pnpm as package manager (pnpm-lock.yaml), Dockerfile uses node + corepack pnpm for deps + build
 - OpenAI SDK (gpt-5.2) for AI message generation at /api/ai/generate-message
 - Unipile Node SDK for LinkedIn API integration (connections, chats, search, invites)
 - Nodemailer for login/register email notifications via SMTP
@@ -34,6 +34,9 @@
 - Unipile LinkedIn connection via hosted auth link or direct credential auth + checkpoint
 - Auth callback at /auth/callback sets unipile session cookie after LinkedIn connect
 - Dashboard layout (src/app/dashboard/layout.tsx) redirects to /login if no user_id cookie
+- src/lib/session.ts is the one place that answers "who is signed in and is LinkedIn linked": getSession() reads the account from the User row (not the unipile_account_id cookie), requireLinkedin() guards API routes, getLinkedinStatus() returns connected / expired / none after asking Unipile (cached 60s)
+- "Disconnect LinkedIn" sets a linkedin_disconnected cookie; the account id stays on the User row for reconnect
+- unipileError() maps a dead LinkedIn session to 409 + code LINKEDIN_DISCONNECTED; ErrorState shows a reconnect button for it
 
 ## Database Schema (Prisma)
 - User: id(cuid), email(unique), password(hashed), unipileAccountId(nullable)
@@ -75,10 +78,11 @@
 - /dashboard/search — SearchPanel for LinkedIn people search
 - /dashboard/sequences — SequencesPanel for outreach automation campaigns
 - /dashboard/templates — TemplatesPanel for message template CRUD
-- Pages requiring LinkedIn show LinkedinConnectPrompt if unipile_account_id cookie missing
+- Pages requiring LinkedIn show LinkedinConnectPrompt unless getLinkedinStatus() is "connected"
 
 ## Key Patterns & Conventions
-- All API routes use cookies() for auth; pattern: check user_id then unipile_account_id
+- LinkedIn API routes start with requireLinkedin() from src/lib/session.ts; never read unipile_account_id from cookies
+- Browser fetches go through apiFetch (src/lib/api-client.ts) so failures carry the server's message and code
 - Unipile client is singleton (src/lib/unipile.ts), requires UNIPILE_API_URL + UNIPILE_ACCESS_TOKEN
 - Some routes use Unipile SDK client, others use raw fetch to Unipile REST API directly
 - Legacy LinkedIn OAuth fallback exists in profile/connections/message routes (rarely used)
@@ -102,7 +106,8 @@
 - Wellfound scrape selector: `a[href^="/jobs/"]` filtered by `/jobs/\d+-/`, deduplicated via Set
 
 ## Gotchas
-- next.config.mjs has ignoreBuildErrors:true for TypeScript — build won't catch type errors
+- The build type-checks (ignoreBuildErrors was removed); run `pnpm typecheck` before pushing
+- Unipile's chat list has no names or previews; /api/linkedin/chats fetches attendees and the last message per chat
 - images.unoptimized:true — no Next.js image optimization
 - Unipile callback stores account_id in global in-memory store (not DB) — lost on restart
 - Sequence "message" step type is simplified — doesn't actually look up existing chat ID

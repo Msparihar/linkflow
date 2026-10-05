@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { getUnipileClient } from '@/lib/unipile';
 import { prisma } from '@/lib/prisma';
+import { DISCONNECTED_COOKIE, forgetLinkedinHealth } from '@/lib/session';
 
 export async function POST(request: NextRequest) {
   try {
@@ -25,6 +26,10 @@ export async function POST(request: NextRequest) {
     });
 
     const existingAccountId = user?.unipileAccountId;
+
+    // The user comes back from LinkedIn with the same account id, so recheck it then.
+    cookieStore.delete(DISCONNECTED_COOKIE);
+    if (existingAccountId) forgetLinkedinHealth(existingAccountId);
 
     const baseParams = {
       api_url: process.env.UNIPILE_API_URL!,

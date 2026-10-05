@@ -8,6 +8,7 @@ export async function POST() {
   cookieStore.delete("user_id")
   cookieStore.delete("linkedin_access_token")
   cookieStore.delete("unipile_account_id")
+  cookieStore.delete("linkedin_disconnected")
 
   return NextResponse.json({ success: true })
 }

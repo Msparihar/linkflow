@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { cookies } from "next/headers"
+import { requireLinkedin } from "@/lib/session"
 
 interface CSVContact {
   firstName: string
@@ -32,17 +32,9 @@ interface ContactWithMatches {
 
 // POST /api/import/csv - Parse CSV and search for matches
 export async function POST(request: NextRequest) {
-  const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
-
-  if (!userId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!unipileAccountId) {
-    return NextResponse.json({ error: "LinkedIn not connected" }, { status: 401 })
-  }
+  const session = await requireLinkedin()
+  if (session instanceof NextResponse) return session
+  const { accountId: unipileAccountId } = session
 
   try {
     const formData = await request.formData()

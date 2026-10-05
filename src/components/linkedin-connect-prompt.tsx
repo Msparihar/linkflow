@@ -29,7 +29,7 @@ type Step =
 
 type ContractOption = { id: string; name: string }
 
-export function LinkedinConnectPrompt() {
+export function LinkedinConnectPrompt({ expired = false }: { expired?: boolean }) {
   const [connecting, setConnecting] = useState(false)
 
   const [step, setStep] = useState<Step>("choose")
@@ -235,7 +235,7 @@ export function LinkedinConnectPrompt() {
     const callbackName = `__arkose_callback_${Date.now()}`
 
     // Set up global callback for when captcha is solved
-    ;(window as Record<string, unknown>)[callbackName] = (token: string) => {
+    ;(window as unknown as Record<string, unknown>)[callbackName] = (token: string) => {
       setCaptchaToken(token)
     }
 
@@ -253,7 +253,7 @@ export function LinkedinConnectPrompt() {
     container?.appendChild(script)
 
     return () => {
-      delete (window as Record<string, unknown>)[callbackName]
+      delete (window as unknown as Record<string, unknown>)[callbackName]
       if (container?.contains(script)) {
         container.removeChild(script)
       }
@@ -263,7 +263,9 @@ export function LinkedinConnectPrompt() {
   const getSubtitle = () => {
     switch (step) {
       case 'choose':
-        return 'Connect your LinkedIn account to search through your connections and send personalized messages.'
+        return expired
+          ? 'LinkedIn signed this app out of your account. Reconnect to get your connections, messages and search back.'
+          : 'Connect your LinkedIn account to search through your connections and send personalized messages.'
       case 'credentials':
         return 'Enter your LinkedIn credentials to connect your account.'
       case 'checkpoint':
@@ -289,7 +291,9 @@ export function LinkedinConnectPrompt() {
         <Linkedin className="w-10 h-10 text-primary" />
       </div>
       <div className="text-center space-y-2">
-        <h1 className="text-3xl font-bold text-foreground">Connect Your LinkedIn</h1>
+        <h1 className="text-3xl font-bold text-foreground">
+          {expired ? 'Reconnect Your LinkedIn' : 'Connect Your LinkedIn'}
+        </h1>
         <p className="text-muted-foreground max-w-md">
           {getSubtitle()}
         </p>
@@ -310,7 +314,7 @@ export function LinkedinConnectPrompt() {
               ) : (
                 <LinkIcon className="w-5 h-5 mr-2" />
               )}
-              {connecting ? 'Connecting...' : 'Connect LinkedIn Account'}
+              {connecting ? 'Connecting...' : expired ? 'Reconnect LinkedIn Account' : 'Connect LinkedIn Account'}
             </Button>
             <Button
               size="lg"

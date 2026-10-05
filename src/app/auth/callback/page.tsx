@@ -13,6 +13,13 @@ function AuthCallbackContent() {
   const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
+    // A reconnect keeps the same account, so there may be no id to save.
+    if (status === 'success' && !accountId) {
+      setRedirecting(true);
+      window.location.href = '/dashboard';
+      return;
+    }
+
     if (status === 'success' && accountId) {
       setRedirecting(true);
 

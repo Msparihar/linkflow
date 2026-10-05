@@ -1,29 +1,24 @@
-import { cookies } from "next/headers"
 import { redirect } from "next/navigation"
 import { DashboardShell } from "@/components/dashboard-shell"
 import { QueryProvider } from "@/components/query-provider"
+import { getLinkedinStatus, getSession } from "@/lib/session"
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  const cookieStore = await cookies()
-
-  // Check for user session
-  const userId = cookieStore.get("user_id")
+  const { userId } = await getSession()
 
   if (!userId) {
     redirect("/login")
   }
 
-  // Check if LinkedIn is connected
-  const unipileAccountId = cookieStore.get("unipile_account_id")
-  const linkedinConnected = !!unipileAccountId
+  const linkedinStatus = await getLinkedinStatus()
 
   return (
     <QueryProvider>
-      <DashboardShell linkedinConnected={linkedinConnected}>
+      <DashboardShell linkedinStatus={linkedinStatus}>
         {children}
       </DashboardShell>
     </QueryProvider>

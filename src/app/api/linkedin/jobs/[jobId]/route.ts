@@ -1,21 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
-import { cookies } from "next/headers"
+import { requireLinkedin, unipileError } from "@/lib/session"
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
-  const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
-
-  if (!userId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!unipileAccountId) {
-    return NextResponse.json({ error: "LinkedIn not connected" }, { status: 401 })
-  }
+  const session = await requireLinkedin()
+  if (session instanceof NextResponse) return session
+  const { accountId: unipileAccountId } = session
 
   const baseUrl = process.env.UNIPILE_API_URL
   const token = process.env.UNIPILE_ACCESS_TOKEN
@@ -41,10 +33,7 @@ export async function GET(
     if (!response.ok) {
       const errorText = await response.text()
       console.error("Job detail fetch error:", errorText)
-      return NextResponse.json(
-        { error: "Failed to fetch job details" },
-        { status: response.status }
-      )
+      return unipileError(unipileAccountId, errorText, "Couldn't load this job. Try again.", response.status)
     }
 
     const data = await response.json()

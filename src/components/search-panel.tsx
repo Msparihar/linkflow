@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { useQuery, useMutation } from "@tanstack/react-query"
+import { apiFetch } from "@/lib/api-client"
+import { ErrorState } from "@/components/error-state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -73,14 +75,13 @@ export function SearchPanel() {
   })
 
   const searchMutation = useMutation({
+    // The failure shows in place of the results, so skip the global toast.
+    onError: () => {},
     mutationFn: async (query: string) => {
-      const res = await fetch(`/api/linkedin/search?q=${encodeURIComponent(query)}&limit=20`)
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || "Search failed")
-      }
-      const data = await res.json()
-      return (data.profiles || []) as Profile[]
+      const data = await apiFetch<{ profiles?: Profile[] }>(
+        `/api/linkedin/search?q=${encodeURIComponent(query)}&limit=20`
+      )
+      return data.profiles || []
     },
   })
 
@@ -264,6 +265,13 @@ export function SearchPanel() {
             </div>
           ))}
         </div>
+      ) : searchMutation.isError ? (
+        <ErrorState
+          title="Search didn't go through"
+          error={searchMutation.error}
+          onRetry={() => searchMutation.mutate(searchQuery)}
+          retrying={searchMutation.isPending}
+        />
       ) : hasSearched ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <Search className="w-12 h-12 text-muted-foreground mb-4" />

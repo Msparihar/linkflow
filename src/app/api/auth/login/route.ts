@@ -36,6 +36,8 @@ export async function POST(request: NextRequest) {
       maxAge: 60 * 60 * 24 * 7, // 7 days
     })
 
+    cookieStore.delete('linkedin_disconnected')
+
     // If user has LinkedIn connected, also set that cookie
     if (user.unipileAccountId) {
       cookieStore.set('unipile_account_id', user.unipileAccountId, {

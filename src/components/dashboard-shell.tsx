@@ -4,13 +4,14 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Menu } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
+import type { LinkedinStatus } from "@/lib/session"
 
 interface DashboardShellProps {
-  linkedinConnected: boolean
+  linkedinStatus: LinkedinStatus
   children: React.ReactNode
 }
 
-export function DashboardShell({ linkedinConnected, children }: DashboardShellProps) {
+export function DashboardShell({ linkedinStatus, children }: DashboardShellProps) {
   const router = useRouter()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -29,7 +30,7 @@ export function DashboardShell({ linkedinConnected, children }: DashboardShellPr
   return (
     <div className="flex h-screen bg-background">
       <Sidebar
-        linkedinConnected={linkedinConnected}
+        linkedinStatus={linkedinStatus}
         onLogout={handleLogout}
         onDisconnectLinkedin={handleDisconnectLinkedin}
         collapsed={collapsed}

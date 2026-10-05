@@ -19,9 +19,10 @@ import {
   Building2
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import type { LinkedinStatus } from "@/lib/session"
 
 interface SidebarProps {
-  linkedinConnected: boolean
+  linkedinStatus: LinkedinStatus
   onLogout: () => void
   onDisconnectLinkedin: () => void
   collapsed: boolean
@@ -31,7 +32,7 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  linkedinConnected,
+  linkedinStatus,
   onLogout,
   onDisconnectLinkedin,
   collapsed,
@@ -40,6 +41,9 @@ export function Sidebar({
   onMobileClose,
 }: SidebarProps) {
   const pathname = usePathname()
+  // An expired link keeps the pages reachable: they show the reconnect screen.
+  const linkedinConnected = linkedinStatus !== "none"
+  const linkedinExpired = linkedinStatus === "expired"
 
   const navItems = [
     {
@@ -209,14 +213,18 @@ export function Sidebar({
       </nav>
 
       {/* LinkedIn connection status */}
-      {!linkedinConnected && (!collapsed || mobileOpen) && (
+      {(!linkedinConnected || linkedinExpired) && (!collapsed || mobileOpen) && (
         <div className={cn("mx-3 mb-4 p-3 bg-accent/50 rounded-lg border border-primary/20 animate-fade-up", collapsed && !mobileOpen && "md:hidden")}>
           <div className="flex items-start gap-2">
             <Sparkles className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
             <div className="space-y-1">
-              <p className="text-xs font-medium text-foreground">Connect LinkedIn</p>
+              <p className="text-xs font-medium text-foreground">
+                {linkedinExpired ? "LinkedIn signed you out" : "Connect LinkedIn"}
+              </p>
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Link your account to unlock messaging features.
+                {linkedinExpired
+                  ? "Reconnect your account to keep using search and messages."
+                  : "Link your account to unlock messaging features."}
               </p>
             </div>
           </div>
@@ -228,7 +236,7 @@ export function Sidebar({
         "p-3 border-t border-border space-y-1",
         collapsed && !mobileOpen && "md:px-2"
       )}>
-        {linkedinConnected && (
+        {linkedinConnected && !linkedinExpired && (
           <Button
             variant="ghost"
             onClick={() => { onDisconnectLinkedin(); onMobileClose(); }}

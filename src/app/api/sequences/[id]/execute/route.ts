@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { cookies } from "next/headers"
+import { requireLinkedin } from "@/lib/session"
 import { prisma } from "@/lib/prisma"
 
 interface Profile {
@@ -25,18 +25,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
+  const session = await requireLinkedin()
+  if (session instanceof NextResponse) return session
+  const { userId, accountId: unipileAccountId } = session
   const { id } = await params
-
-  if (!userId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!unipileAccountId) {
-    return NextResponse.json({ error: "LinkedIn not connected" }, { status: 401 })
-  }
 
   const baseUrl = process.env.UNIPILE_API_URL
   const token = process.env.UNIPILE_ACCESS_TOKEN

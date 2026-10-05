@@ -2,6 +2,8 @@
 
 import { useState } from "react"
 import { useQuery } from "@tanstack/react-query"
+import { apiFetch } from "@/lib/api-client"
+import { ErrorState } from "@/components/error-state"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -127,6 +129,9 @@ export function JobsPanel() {
     data,
     isLoading,
     isFetching,
+    isError,
+    error,
+    refetch,
   } = useQuery<JobSearchResponse>({
     queryKey: ["jobs", searchTrigger, currentCursor],
     queryFn: async () => {
@@ -142,12 +147,7 @@ export function JobsPanel() {
       if (currentCursor) params.set("cursor", currentCursor)
       params.set("limit", "20")
 
-      const res = await fetch(`/api/linkedin/jobs/search?${params.toString()}`)
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.error || "Search failed")
-      }
-      return res.json()
+      return apiFetch<JobSearchResponse>(`/api/linkedin/jobs/search?${params.toString()}`)
     },
     enabled: !!searchTrigger,
     staleTime: 5 * 60 * 1000,
@@ -477,6 +477,13 @@ export function JobsPanel() {
             </Button>
           </div>
         </>
+      ) : isError ? (
+        <ErrorState
+          title="Job search didn't go through"
+          error={error}
+          onRetry={() => refetch()}
+          retrying={isFetching}
+        />
       ) : hasSearched ? (
         <div className="flex flex-col items-center justify-center py-20">
           <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">

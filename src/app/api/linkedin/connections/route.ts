@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { getUnipileClient } from "@/lib/unipile"
 import { prisma } from "@/lib/prisma"
+import { getSession, unipileError } from "@/lib/session"
 import {
   getCachedConnections,
   getCachedConnectionsPaginated,
@@ -10,8 +11,7 @@ import {
 
 export async function GET(request: NextRequest) {
   const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
+  const { userId, accountId: unipileAccountId } = await getSession()
   const accessToken = cookieStore.get("linkedin_access_token")?.value
 
   if (!userId) {
@@ -123,13 +123,13 @@ export async function GET(request: NextRequest) {
       const err = error as { body?: unknown; message?: string }
       console.error("Connections fetch error:", error)
       console.error("Error body:", JSON.stringify(err.body, null, 2))
-      return NextResponse.json({ error: "Internal server error", details: err.body || err.message }, { status: 500 })
+      return unipileError(unipileAccountId, err.body, "Couldn't load your connections. Try again.")
     }
   }
 
   // Legacy LinkedIn API fallback
   if (!accessToken) {
-    return NextResponse.json({ error: "LinkedIn not connected" }, { status: 401 })
+    return NextResponse.json({ error: "LinkedIn not connected", code: "LINKEDIN_NOT_CONNECTED" }, { status: 401 })
   }
 
   try {

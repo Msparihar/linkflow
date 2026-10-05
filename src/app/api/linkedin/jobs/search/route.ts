@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { cookies } from "next/headers"
+import { requireLinkedin, unipileError } from "@/lib/session"
 
 // LinkedIn filter value mappings
 const JOB_TYPE_MAP: Record<string, string> = {
@@ -32,17 +32,9 @@ const DATE_POSTED_MAP: Record<string, string> = {
 }
 
 export async function GET(request: NextRequest) {
-  const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
-
-  if (!userId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!unipileAccountId) {
-    return NextResponse.json({ error: "LinkedIn not connected" }, { status: 401 })
-  }
+  const session = await requireLinkedin()
+  if (session instanceof NextResponse) return session
+  const { accountId: unipileAccountId } = session
 
   const baseUrl = process.env.UNIPILE_API_URL
   const token = process.env.UNIPILE_ACCESS_TOKEN
@@ -107,10 +99,7 @@ export async function GET(request: NextRequest) {
     if (!searchResponse.ok) {
       const errorText = await searchResponse.text()
       console.error("LinkedIn job search error:", errorText)
-      return NextResponse.json(
-        { error: "Job search failed" },
-        { status: searchResponse.status }
-      )
+      return unipileError(unipileAccountId, errorText, "Job search failed. Try again.", searchResponse.status)
     }
 
     const data = await searchResponse.json()

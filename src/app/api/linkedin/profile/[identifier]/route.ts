@@ -1,22 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
-import { cookies } from "next/headers"
+import { requireLinkedin, unipileError } from "@/lib/session"
 import { getCachedProfile, setCachedProfile } from "@/lib/cache"
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ identifier: string }> }
 ) {
-  const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
-
-  if (!userId) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!unipileAccountId) {
-    return NextResponse.json({ error: "LinkedIn not connected" }, { status: 401 })
-  }
+  const session = await requireLinkedin()
+  if (session instanceof NextResponse) return session
+  const { accountId: unipileAccountId } = session
 
   const { identifier } = await params
 
@@ -53,7 +45,7 @@ export async function GET(
     if (!profileResponse.ok) {
       const errorText = await profileResponse.text()
       console.error("Profile lookup error:", errorText)
-      return NextResponse.json({ error: "Profile not found" }, { status: profileResponse.status })
+      return unipileError(unipileAccountId, errorText, "Profile not found", profileResponse.status)
     }
 
     const profile = await profileResponse.json()

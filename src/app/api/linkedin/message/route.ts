@@ -1,11 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { getUnipileClient } from "@/lib/unipile"
+import { getSession, unipileError } from "@/lib/session"
 
 export async function POST(request: NextRequest) {
   const cookieStore = await cookies()
-  const userId = cookieStore.get("user_id")?.value
-  const unipileAccountId = cookieStore.get("unipile_account_id")?.value
+  const { userId, accountId: unipileAccountId } = await getSession()
   const accessToken = cookieStore.get("linkedin_access_token")?.value
 
   // Check for user session
@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
           if (!sendRes.ok) {
             const errData = await sendRes.text()
             console.error("Unipile send message error:", sendRes.status, errData)
-            return NextResponse.json({ error: "Failed to send message." }, { status: sendRes.status })
+            return unipileError(unipileAccountId, errData, "Failed to send message.", sendRes.status)
           }
 
           const data = await sendRes.json()
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
         const detail = typeof errBody === "object" && errBody && "message" in errBody
           ? String((errBody as { message: unknown }).message)
           : "Failed to send message. Please try again."
-        return NextResponse.json({ error: detail }, { status: 500 })
+        return unipileError(unipileAccountId, errBody, detail, 500)
       }
     }
 

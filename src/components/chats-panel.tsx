@@ -10,6 +10,8 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Loader2, MessageSquare, Send, ArrowLeft, CheckCheck, ChevronLeft, ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AiMessageWriter } from "@/components/ai-message-writer"
+import { apiFetch } from "@/lib/api-client"
+import { ErrorState } from "@/components/error-state"
 
 interface Chat {
   id: string
@@ -49,14 +51,19 @@ export function ChatsPanel() {
 
   const currentCursor = cursors[page - 1] ?? null
 
-  const { data: chatsData, isLoading: loadingChats, isFetching } = useQuery({
+  const {
+    data: chatsData,
+    isLoading: loadingChats,
+    isFetching,
+    isError: chatsFailed,
+    error: chatsError,
+    refetch: refetchChats,
+  } = useQuery({
     queryKey: ["chats", currentCursor],
     queryFn: async () => {
       const params = new URLSearchParams({ limit: "10" })
       if (currentCursor) params.set("cursor", currentCursor)
-      const res = await fetch(`/api/linkedin/chats?${params}`)
-      if (!res.ok) throw new Error("Failed to fetch chats")
-      return res.json() as Promise<{ chats: Chat[]; cursor?: string }>
+      return apiFetch<{ chats: Chat[]; cursor?: string }>(`/api/linkedin/chats?${params}`)
     },
     staleTime: 5 * 60 * 1000,
   })
@@ -176,7 +183,14 @@ export function ChatsPanel() {
           </p>
         </div>
 
-        {chats.length === 0 && page === 1 ? (
+        {chatsFailed && !chatsData ? (
+          <ErrorState
+            title="Couldn't load your conversations"
+            error={chatsError}
+            onRetry={() => refetchChats()}
+            retrying={isFetching}
+          />
+        ) : chats.length === 0 && page === 1 ? (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="w-16 h-16 bg-muted rounded-full flex items-center justify-center mb-4">
               <MessageSquare className="w-8 h-8 text-muted-foreground" />
