@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { getUnipileClient } from "@/lib/unipile"
 
@@ -93,7 +94,7 @@ export async function syncConnections(accountId: string) {
     .map((c) => ({
       accountId,
       providerId: c.providerId,
-      data: c.data,
+      data: c.data as Prisma.InputJsonValue,
       cachedAt: now,
     }))
 
@@ -125,10 +126,11 @@ export async function setCachedProfile(
   providerId: string,
   data: Record<string, unknown>
 ) {
+  const json = data as Prisma.InputJsonValue
   await prisma.cachedProfile.upsert({
     where: { accountId_providerId: { accountId, providerId } },
-    update: { data, cachedAt: new Date() },
-    create: { accountId, providerId, data, cachedAt: new Date() },
+    update: { data: json, cachedAt: new Date() },
+    create: { accountId, providerId, data: json, cachedAt: new Date() },
   })
 }
 

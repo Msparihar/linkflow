@@ -1,15 +1,21 @@
-FROM oven/bun:1-alpine AS deps
-WORKDIR /app
-COPY package.json bun.lockb ./
-RUN bun install --frozen-lockfile
+FROM node:lts-alpine AS base
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
 
-FROM oven/bun:1-alpine AS builder
+FROM base AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY prisma ./prisma
+RUN pnpm install --frozen-lockfile
+
+FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NODE_ENV=production
-RUN bun run prisma generate
-RUN bun run build
+# prisma.config.ts needs a URL to load; generate does not connect to it.
+RUN DATABASE_URL=postgresql://build:build@localhost:5432/build pnpm exec prisma generate
+RUN pnpm run build
 
 FROM node:lts-alpine AS runner
 WORKDIR /app
