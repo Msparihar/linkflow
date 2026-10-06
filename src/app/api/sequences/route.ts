@@ -26,11 +26,63 @@ export async function GET() {
       orderBy: { createdAt: "desc" }
     })
 
+    const ids = sequences.map(seq => seq.id)
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+
+    const [byStatus, byStep, sentToday, lastErrors] = await Promise.all([
+      prisma.sequenceExecution.groupBy({
+        by: ["sequenceId", "status"],
+        where: { sequenceId: { in: ids } },
+        _count: { _all: true }
+      }),
+      prisma.$queryRaw<Array<{ sequenceId: string; type: string; status: string; people: number }>>`
+        SELECT e."sequenceId", s."type", es."status", COUNT(DISTINCT es."executionId")::int AS people
+        FROM "SequenceExecutionStep" es
+        JOIN "SequenceExecution" e ON e."id" = es."executionId"
+        JOIN "SequenceStep" s ON s."id" = es."stepId"
+        WHERE e."sequenceId" = ANY(${ids}::text[]) AND es."status" IN ('sent', 'accepted')
+        GROUP BY 1, 2, 3
+      `,
+      prisma.$queryRaw<Array<{ sequenceId: string; sent: number }>>`
+        SELECT e."sequenceId", COUNT(*)::int AS sent
+        FROM "SequenceExecutionStep" es
+        JOIN "SequenceExecution" e ON e."id" = es."executionId"
+        JOIN "SequenceStep" s ON s."id" = es."stepId"
+        WHERE e."sequenceId" = ANY(${ids}::text[]) AND es."status" = 'sent'
+          AND s."type" IN ('invite', 'message') AND es."sentAt" >= ${dayAgo}
+        GROUP BY 1
+      `,
+      prisma.sequenceExecution.findMany({
+        where: { sequenceId: { in: ids }, status: { in: ["paused", "pending", "in_progress"] }, lastError: { not: null } },
+        orderBy: { updatedAt: "desc" },
+        distinct: ["sequenceId"],
+        select: { sequenceId: true, lastError: true }
+      })
+    ])
+
+    const statsFor = (id: string) => {
+      const status = (name: string) =>
+        byStatus.find(row => row.sequenceId === id && row.status === name)?._count._all || 0
+      const step = (type: string, name: string) =>
+        byStep.find(row => row.sequenceId === id && row.type === type && row.status === name)?.people || 0
+      return {
+        invited: step("invite", "sent"),
+        accepted: step("invite", "accepted"),
+        messaged: step("message", "sent"),
+        replied: status("replied"),
+        failed: status("failed"),
+        inProgress: status("pending") + status("in_progress") + status("paused"),
+        sentToday: sentToday.find(row => row.sequenceId === id)?.sent || 0,
+        notice: lastErrors.find(row => row.sequenceId === id)?.lastError || null
+      }
+    }
+
     return NextResponse.json({
       sequences: sequences.map(seq => ({
         ...seq,
         targetProfiles: JSON.parse(seq.targetProfiles),
-        executionCount: seq._count.executions
+        executionCount: seq._count.executions,
+        stats: statsFor(seq.id)
       }))
     })
   } catch (error) {

@@ -66,7 +66,7 @@
 - /api/sequences — GET list, POST create outreach sequence with steps
 - /api/sequences/[id] — GET/PUT/DELETE individual sequence
 - /api/sequences/[id]/start — POST start sequence (creates executions for each target)
-- /api/sequences/[id]/execute — POST execute next batch of pending sequence actions
+- /api/sequences/[id]/execute — POST send up to 5 ready actions now, within the daily limit
 - /api/sequences/[id]/pause — POST pause sequence
 - /api/import/csv — POST parse CSV file and return contacts for LinkedIn search matching
 - /api/auth/unipile/* — LinkedIn connect/disconnect/callback/checkpoint/session endpoints
@@ -88,7 +88,7 @@
 - Legacy LinkedIn OAuth fallback exists in profile/connections/message routes (rarely used)
 - Prisma client is singleton with global cache for dev HMR (src/lib/prisma.ts)
 - Template placeholders: {{firstName}}, {{lastName}}, {{fullName}}, {{headline}}, {{location}}
-- Sequence execution adds random delays (1-3s) between invites to mimic human behavior
+- The sequence timer sends one action per sequence per tick, spaced by the sequence's min/max gap
 - AI message writer has anti-injection safeguards in system prompt
 - CSS uses LinkedIn-inspired design system with CSS custom properties in globals.css
 - Fonts: Plus Jakarta Sans (headings), Inter (body), JetBrains Mono (monospace)
@@ -110,7 +110,10 @@
 - Unipile's chat list has no names or previews; /api/linkedin/chats fetches attendees and the last message per chat
 - images.unoptimized:true — no Next.js image optimization
 - Unipile callback stores account_id in global in-memory store (not DB) — lost on restart
-- Sequence "message" step type is simplified — doesn't actually look up existing chat ID
+- Sequences run from src/lib/sequence-engine.ts: src/instrumentation.ts starts a one-minute timer in production (single replica assumed), and "Send Now" calls the same engine
+- Sequence state lives in the DB (SequenceExecution.nextActionAt); only caches, the gap between sends and LinkedIn-limit backoff are in memory
+- A message step sends only to connections and waits up to 60 days for the accept; a reply ends that person's sequence (status "replied")
+- SequenceExecutionStep rows are the send log: the daily limit counts "sent" rows from the last 24h, and an "accepted" row on the invite step marks the accept. Don't delete step rows of a started sequence
 - targetProfiles stored as JSON string in DB, parsed/serialized manually (not native JSON)
 - CSV import max 100 contacts per file
 - Prisma config uses "classic" engine (prisma.config.ts)

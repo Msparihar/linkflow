@@ -72,6 +72,16 @@ export async function POST(
       })
     }
 
+    // Resume anyone a pause left mid-sequence
+    await prisma.sequenceExecution.updateMany({
+      where: { sequenceId: id, status: "paused", nextActionAt: null },
+      data: { nextActionAt: new Date() }
+    })
+    await prisma.sequenceExecution.updateMany({
+      where: { sequenceId: id, status: "paused" },
+      data: { status: "in_progress", lastError: null }
+    })
+
     // Update sequence status to active
     await prisma.outreachSequence.update({
       where: { id },

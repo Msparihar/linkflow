@@ -101,7 +101,29 @@ interface Sequence {
   failedCount: number
   createdAt: string
   updatedAt: string
+  stats?: {
+    invited: number
+    accepted: number
+    messaged: number
+    replied: number
+    failed: number
+    inProgress: number
+    sentToday: number
+    notice: string | null
+  }
 }
+
+interface SequencePerson {
+  id: string
+  name: string
+  status: string
+  stage: string
+  next: string | null
+  nextActionAt: string | null
+  error: string | null
+}
+
+const INVITE_NOTE_MAX = 300
 
 export function SequencesPanel() {
   const queryClient = useQueryClient()
@@ -131,6 +153,19 @@ export function SequencesPanel() {
   // Action states
   const [executingId, setExecutingId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [resultsSequence, setResultsSequence] = useState<Sequence | null>(null)
+
+  const { data: people = [], isLoading: peopleLoading } = useQuery({
+    queryKey: ["sequence-people", resultsSequence?.id],
+    enabled: !!resultsSequence,
+    queryFn: async () => {
+      const res = await fetch(`/api/sequences/${resultsSequence!.id}`)
+      if (!res.ok) throw new Error("Failed to load results")
+      const data = await res.json()
+      return (data.sequence?.people || []) as SequencePerson[]
+    },
+  })
 
   const { data: sequences = [], isLoading } = useQuery({
     queryKey: ["sequences"],
@@ -276,9 +311,11 @@ export function SequencesPanel() {
       }
       return res.json()
     },
-    onMutate: (id) => { setExecutingId(id) },
-    onSuccess: () => {
+    onMutate: (id) => { setExecutingId(id); setError(null); setNotice(null) },
+    onSuccess: (data: { message?: string }) => {
       queryClient.invalidateQueries({ queryKey: ["sequences"] })
+      queryClient.invalidateQueries({ queryKey: ["sequence-people"] })
+      if (data.message) setNotice(data.message)
     },
     onError: (error: Error) => {
       setError(error.message)
@@ -347,6 +384,15 @@ export function SequencesPanel() {
     delayMaxMinutes: formDelayMax,
   })
 
+  const stepMessage = (step: SequenceStep) =>
+    step.templateId
+      ? templates.find(t => t.id === step.templateId)?.content || ""
+      : step.customMessage || ""
+
+  const inviteNoteTooLong = formSteps.some(
+    step => step.type === "invite" && stepMessage(step).length > INVITE_NOTE_MAX
+  )
+
   const handleCreateSequence = () => {
     if (!formName.trim()) return
     setError(null)
@@ -402,7 +448,7 @@ export function SequencesPanel() {
         <div>
           <h2 className="text-2xl font-bold">Outreach Sequences</h2>
           <p className="text-muted-foreground mt-1">
-            Automate your LinkedIn outreach with scheduled connection requests
+            Invitations and follow-ups go out by themselves while a sequence is active
           </p>
         </div>
         <Button onClick={() => { resetForm(); setShowCreateDialog(true) }}>
@@ -415,6 +461,13 @@ export function SequencesPanel() {
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
           <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {notice && (
+        <Alert>
+          <CheckCircle className="h-4 w-4" />
+          <AlertDescription>{notice}</AlertDescription>
         </Alert>
       )}
 
@@ -454,13 +507,25 @@ export function SequencesPanel() {
                       <span>{sequence.totalTargets} targets</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <CheckCircle className="w-4 h-4 text-green-500" />
-                      <span>{sequence.sentCount} sent</span>
+                      <UserPlus className="w-4 h-4" />
+                      <span>{sequence.stats?.invited ?? 0} invited</span>
                     </div>
-                    {sequence.failedCount > 0 && (
+                    <div className="flex items-center gap-1">
+                      <CheckCircle className="w-4 h-4 text-green-500" />
+                      <span>{sequence.stats?.accepted ?? 0} accepted</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Mail className="w-4 h-4" />
+                      <span>{sequence.stats?.messaged ?? 0} messaged</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <ChevronRight className="w-4 h-4 text-blue-500" />
+                      <span>{sequence.stats?.replied ?? 0} replied</span>
+                    </div>
+                    {(sequence.stats?.failed ?? 0) > 0 && (
                       <div className="flex items-center gap-1">
                         <XCircle className="w-4 h-4 text-red-500" />
-                        <span>{sequence.failedCount} failed</span>
+                        <span>{sequence.stats?.failed} failed</span>
                       </div>
                     )}
                     <div className="flex items-center gap-1">
@@ -468,10 +533,23 @@ export function SequencesPanel() {
                       <span>{sequence.steps.length} steps</span>
                     </div>
                   </div>
+
+                  {sequence.status === "active" && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Running by itself. Sent {sequence.stats?.sentToday ?? 0} of {sequence.dailyLimit} in the last 24 hours
+                      {(sequence.stats?.inProgress ?? 0) > 0 ? `, ${sequence.stats?.inProgress} people still in progress.` : "."}
+                    </p>
+                  )}
+                  {sequence.stats?.notice && sequence.status !== "completed" && (
+                    <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      {sequence.stats.notice}
+                    </p>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {sequence.status === "draft" || sequence.status === "paused" ? (
+                  {sequence.status !== "active" ? (
                     <Button
                       size="sm"
                       onClick={() => startMutation.mutate(sequence.id)}
@@ -486,7 +564,7 @@ export function SequencesPanel() {
                         </>
                       )}
                     </Button>
-                  ) : sequence.status === "active" ? (
+                  ) : (
                     <>
                       <Button
                         size="sm"
@@ -499,7 +577,7 @@ export function SequencesPanel() {
                         ) : (
                           <>
                             <Zap className="w-4 h-4 mr-1" />
-                            Run Now
+                            Send Now
                           </>
                         )}
                       </Button>
@@ -513,8 +591,17 @@ export function SequencesPanel() {
                         Pause
                       </Button>
                     </>
-                  ) : null}
+                  )}
 
+                  {sequence.status !== "draft" && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setResultsSequence(sequence)}
+                    >
+                      Results
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -785,6 +872,20 @@ export function SequencesPanel() {
                         />
                       </div>
                     )}
+
+                    {step.type === "invite" && (
+                      <p className={cn(
+                        "text-xs",
+                        stepMessage(step).length > INVITE_NOTE_MAX ? "text-destructive" : "text-muted-foreground"
+                      )}>
+                        {stepMessage(step).length}/{INVITE_NOTE_MAX} characters. LinkedIn cuts invitation notes at {INVITE_NOTE_MAX}, and a long name or headline adds to the count.
+                      </p>
+                    )}
+                    {step.type === "message" && (
+                      <p className="text-xs text-muted-foreground">
+                        Sent only once they have accepted your invitation. Skipped for anyone who has already replied.
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
@@ -804,10 +905,10 @@ export function SequencesPanel() {
                     onChange={(e) => setFormDailyLimit(Math.max(1, Math.min(100, parseInt(e.target.value) || 30)))}
                     className="mt-1"
                   />
-                  <p className="text-xs text-muted-foreground mt-1">Max invites per day</p>
+                  <p className="text-xs text-muted-foreground mt-1">Max invites and messages per 24 hours</p>
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground">Min Delay (min)</label>
+                  <label className="text-xs text-muted-foreground">Min gap between sends (min)</label>
                   <Input
                     type="number"
                     min={1}
@@ -818,7 +919,7 @@ export function SequencesPanel() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground">Max Delay (min)</label>
+                  <label className="text-xs text-muted-foreground">Max gap between sends (min)</label>
                   <Input
                     type="number"
                     min={1}
@@ -842,7 +943,7 @@ export function SequencesPanel() {
               </Button>
               <Button
                 onClick={selectedSequence ? handleUpdateSequence : handleCreateSequence}
-                disabled={saving || !formName.trim()}
+                disabled={saving || !formName.trim() || inviteNoteTooLong}
               >
                 {saving ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -940,6 +1041,61 @@ export function SequencesPanel() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Results Dialog */}
+      <Dialog open={!!resultsSequence} onOpenChange={(open) => { if (!open) setResultsSequence(null) }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{resultsSequence?.name}</DialogTitle>
+            <DialogDescription>
+              Where each person is in this sequence
+            </DialogDescription>
+          </DialogHeader>
+
+          <ScrollArea className="h-96 mt-2">
+            {peopleLoading ? (
+              <div className="flex items-center justify-center h-32">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              </div>
+            ) : people.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                Nobody has been contacted yet.
+              </p>
+            ) : (
+              <div className="space-y-2 pr-3">
+                {people.map((person) => (
+                  <div key={person.id} className="flex items-start justify-between gap-4 p-2 rounded bg-muted/50">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{person.name}</p>
+                      {person.error ? (
+                        <p className="text-xs text-destructive">{person.error}</p>
+                      ) : person.next ? (
+                        <p className="text-xs text-muted-foreground">
+                          {person.next}
+                          {person.nextActionAt && new Date(person.nextActionAt) > new Date()
+                            ? `, next check ${new Date(person.nextActionAt).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}`
+                            : ""}
+                        </p>
+                      ) : null}
+                    </div>
+                    <Badge
+                      variant="secondary"
+                      className={cn(
+                        "shrink-0",
+                        person.stage === "Replied" && "bg-blue-100 text-blue-700",
+                        person.stage === "Accepted" && "bg-green-100 text-green-700",
+                        person.stage === "Failed" && "bg-red-100 text-red-700"
+                      )}
+                    >
+                      {person.stage}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </ScrollArea>
         </DialogContent>
       </Dialog>
 
