@@ -65,6 +65,12 @@ model OutreachSequence {
   delayMinMinutes Int @default(5) // Minimum delay between invites
   delayMaxMinutes Int @default(15) // Maximum delay between invites
 
+  // Sending hours in the sequence's timezone; 0-24 every day means any time
+  sendFromHour     Int     @default(0)
+  sendUntilHour    Int     @default(24)
+  sendWeekdaysOnly Boolean @default(false)
+  timezone         String  @default("UTC")
+
   // Stats
   totalTargets   Int @default(0)
   sentCount      Int @default(0)

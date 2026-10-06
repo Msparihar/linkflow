@@ -27,7 +27,9 @@ import {
   ChevronLeft,
   ChevronRight,
   RefreshCw,
+  Zap,
 } from "lucide-react"
+import { AddToSequenceDialog } from "@/components/sequences/add-to-sequence-dialog"
 import { ConnectionMessageDialog } from "@/components/connection-message-dialog"
 import { BulkMessageDialog } from "@/components/bulk-message-dialog"
 import { cn } from "@/lib/utils"
@@ -58,6 +60,7 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
   const [selectionMode, setSelectionMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isBulkDialogOpen, setIsBulkDialogOpen] = useState(false)
+  const [isSequenceDialogOpen, setIsSequenceDialogOpen] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const queryClient = useQueryClient()
 
@@ -354,14 +357,25 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
               All
             </Button>
           </div>
-          <Button
-            size="sm"
-            disabled={selectedIds.size === 0}
-            onClick={() => setIsBulkDialogOpen(true)}
-          >
-            <Send className="w-4 h-4 mr-1.5" />
-            Message
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={selectedIds.size === 0}
+              onClick={() => setIsSequenceDialogOpen(true)}
+            >
+              <Zap className="w-4 h-4 mr-1.5" />
+              Sequence
+            </Button>
+            <Button
+              size="sm"
+              disabled={selectedIds.size === 0}
+              onClick={() => setIsBulkDialogOpen(true)}
+            >
+              <Send className="w-4 h-4 mr-1.5" />
+              Message
+            </Button>
+          </div>
         </div>
       )}
 
@@ -387,8 +401,24 @@ export function ConnectionsPanel({ onConnectionCountChange }: ConnectionsPanelPr
             <Send className="w-4 h-4 mr-1.5" />
             Message ({selectedIds.size})
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={selectedIds.size === 0}
+            onClick={() => setIsSequenceDialogOpen(true)}
+          >
+            <Zap className="w-4 h-4 mr-1.5" />
+            Add to sequence
+          </Button>
         </div>
       )}
+
+      <AddToSequenceDialog
+        open={isSequenceDialogOpen}
+        onOpenChange={setIsSequenceDialogOpen}
+        profiles={getSelectedConnections()}
+        onAdded={clearSelection}
+      />
 
       {/* Single message dialog */}
       <ConnectionMessageDialog

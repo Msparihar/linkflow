@@ -4,6 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Menu } from "lucide-react"
 import { Sidebar } from "@/components/sidebar"
+import { Toaster } from "@/components/ui/sonner"
 import type { LinkedinStatus } from "@/lib/session"
 
 interface DashboardShellProps {
@@ -56,6 +57,7 @@ export function DashboardShell({ linkedinStatus, children }: DashboardShellProps
           </div>
         </div>
       </main>
+      <Toaster position="bottom-right" richColors closeButton />
     </div>
   )
 }

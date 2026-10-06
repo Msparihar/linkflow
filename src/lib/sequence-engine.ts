@@ -1,6 +1,7 @@
 import type { Prisma, SequenceExecution } from "@prisma/client"
 import { prisma } from "@/lib/prisma"
 import { getUnipileClient } from "@/lib/unipile"
+import { applyTemplate, fitInviteNote, withinSendingHours } from "@/lib/sequence-text"
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -18,8 +19,6 @@ const SWEEP_EVERY_MS = 10 * MINUTE
 const CLAIM_MS = 10 * MINUTE
 const CONNECTIONS_TTL_MS = 30 * MINUTE
 const INCOMING_TTL_MS = 10 * MINUTE
-
-export const INVITE_NOTE_MAX = 300
 
 const OPEN_STATUSES = ["pending", "in_progress"]
 
@@ -75,26 +74,6 @@ const incoming = new Map<string, { latest: Map<string, number>; at: number }>()
 const sendBlockedUntil = new Map<string, number>()
 const nextSendAt = new Map<string, number>()
 const lastSweepAt = new Map<string, number>()
-
-export function applyTemplate(template: string, profile: Profile): string {
-  return template
-    .replace(/\{\{firstName\}\}/g, profile.firstName || "")
-    .replace(/\{\{lastName\}\}/g, profile.lastName || "")
-    .replace(/\{\{fullName\}\}/g, `${profile.firstName || ""} ${profile.lastName || ""}`.trim())
-    .replace(/\{\{headline\}\}/g, profile.headline || "")
-    .replace(/\{\{location\}\}/g, profile.location || "")
-}
-
-// Cuts at the last full sentence or word that fits, never mid-word.
-export function fitInviteNote(text: string): string {
-  const note = text.trim()
-  if (note.length <= INVITE_NOTE_MAX) return note
-  const head = note.slice(0, INVITE_NOTE_MAX)
-  const sentenceEnd = Math.max(head.lastIndexOf(". "), head.lastIndexOf("! "), head.lastIndexOf("? "))
-  if (sentenceEnd > INVITE_NOTE_MAX * 0.5) return head.slice(0, sentenceEnd + 1)
-  const wordEnd = head.lastIndexOf(" ")
-  return (wordEnd > 0 ? head.slice(0, wordEnd) : head).trim()
-}
 
 function stepText(step: Step, profile: Profile): string {
   const raw = step.customMessage || step.template?.content || ""
@@ -350,10 +329,39 @@ async function advance(ctx: RunContext, execution: SequenceExecution) {
     }
 
     if (step.type === "wait") {
-      const delay = stepDelayMs(step)
+      let from = Date.now()
+
+      // A wait right after an invitation counts from the day they accept
+      const invite = sequence.steps[stepIndex - 1]?.type === "invite"
+        ? await prisma.sequenceExecutionStep.findFirst({
+            where: { executionId: execution.id, status: "sent", step: { type: "invite" } },
+            orderBy: { sentAt: "asc" },
+          })
+        : null
+      if (invite) {
+        const accepted = await prisma.sequenceExecutionStep.findFirst({
+          where: { executionId: execution.id, status: "accepted" },
+          select: { sentAt: true },
+        })
+        if (accepted) {
+          from = (accepted.sentAt ?? new Date()).getTime()
+        } else if ((await connectedAmong(accountId, [profile.id])).has(profile.id)) {
+          await markAccepted(sequence.id, execution.id, invite)
+        } else if (Date.now() - (invite.sentAt ?? invite.createdAt).getTime() > ACCEPT_GIVE_UP_MS) {
+          await save({ status: "not_accepted", completedAt: new Date(), nextActionAt: null, lastError: null })
+          summary.finished++
+          return
+        } else {
+          await save({ nextActionAt: new Date(Date.now() + ACCEPT_RECHECK_MS), lastError: null })
+          summary.waiting++
+          return
+        }
+      }
+
+      const due = from + stepDelayMs(step)
       stepIndex++
-      if (delay === 0) continue
-      await save({ nextActionAt: new Date(Date.now() + delay), lastError: null })
+      if (due <= Date.now()) continue
+      await save({ nextActionAt: new Date(due), lastError: null })
       summary.waiting++
       return
     }
@@ -568,7 +576,7 @@ export async function runSequence(
     const budget = Math.max(0, sequence.dailyLimit - summary.sentToday)
     const sendsLeft = options.manual
       ? Math.min(budget, MANUAL_BATCH)
-      : (await sendGapOpen(sequence)) ? Math.min(budget, 1) : 0
+      : withinSendingHours(sequence) && (await sendGapOpen(sequence)) ? Math.min(budget, 1) : 0
     const ctx: RunContext = { sequence, accountId, sendsLeft, budget, summary }
 
     const ready = await prisma.sequenceExecution.findMany({

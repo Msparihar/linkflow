@@ -8,7 +8,8 @@ export async function GET(request: NextRequest) {
 
   const searchParams = request.nextUrl.searchParams
   const query = searchParams.get("q")
-  const limit = parseInt(searchParams.get("limit") || "20", 10)
+  const limit = Math.min(parseInt(searchParams.get("limit") || "20", 10), 50)
+  const cursor = searchParams.get("cursor")
 
   if (!query || query.trim().length < 2) {
     return NextResponse.json({ error: "Search query must be at least 2 characters" }, { status: 400 })
@@ -25,7 +26,7 @@ export async function GET(request: NextRequest) {
     // Use the LinkedIn search endpoint with POST
     // Using "classic" API for basic LinkedIn search
     const searchResponse = await fetch(
-      `${baseUrl}/api/v1/linkedin/search?account_id=${unipileAccountId}`,
+      `${baseUrl}/api/v1/linkedin/search?account_id=${unipileAccountId}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`,
       {
         method: "POST",
         headers: {

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { prisma } from "@/lib/prisma"
+import { enrolTargets } from "@/lib/sequence-data"
 
 // POST /api/sequences/[id]/start - Start a sequence
 export async function POST(
@@ -50,27 +51,7 @@ export async function POST(
     }
 
     // Create executions for each target profile that doesn't already have one
-    const existingExecutions = await prisma.sequenceExecution.findMany({
-      where: { sequenceId: id },
-      select: { profileId: true }
-    })
-    const existingProfileIds = new Set(existingExecutions.map(e => e.profileId))
-
-    const newProfiles = targetProfiles.filter(p => !existingProfileIds.has(p.id))
-
-    if (newProfiles.length > 0) {
-      await prisma.sequenceExecution.createMany({
-        data: newProfiles.map(profile => ({
-          sequenceId: id,
-          profileId: profile.id,
-          profileName: `${profile.firstName} ${profile.lastName}`.trim(),
-          profileData: JSON.stringify(profile),
-          status: "pending",
-          currentStep: 0,
-          nextActionAt: new Date() // Ready to execute immediately
-        }))
-      })
-    }
+    const newExecutions = await enrolTargets(id, targetProfiles)
 
     // Resume anyone a pause left mid-sequence
     await prisma.sequenceExecution.updateMany({
@@ -91,7 +72,7 @@ export async function POST(
     return NextResponse.json({
       success: true,
       message: `Sequence started with ${targetProfiles.length} targets`,
-      newExecutions: newProfiles.length
+      newExecutions
     })
   } catch (error) {
     console.error("Failed to start sequence:", error)

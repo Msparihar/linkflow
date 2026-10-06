@@ -76,7 +76,8 @@
 - /dashboard/connections — ConnectionsPanel with infinite scroll, sort, bulk select, messaging
 - /dashboard/chats — ChatsPanel with chat list + message thread + AI message writer
 - /dashboard/search — SearchPanel for LinkedIn people search
-- /dashboard/sequences — SequencesPanel for outreach automation campaigns
+- /dashboard/sequences — SequencesPanel: sequence cards with funnel, start confirm, editor dialog
+- /dashboard/sequences/[id] — SequenceResults: where each person stands, with filter, retry and remove
 - /dashboard/templates — TemplatesPanel for message template CRUD
 - Pages requiring LinkedIn show LinkedinConnectPrompt unless getLinkedinStatus() is "connected"
 
@@ -113,6 +114,11 @@
 - Sequences run from src/lib/sequence-engine.ts: src/instrumentation.ts starts a one-minute timer in production (single replica assumed), and "Send Now" calls the same engine
 - Sequence state lives in the DB (SequenceExecution.nextActionAt); only caches, the gap between sends and LinkedIn-limit backoff are in memory
 - A message step sends only to connections and waits up to 60 days for the accept; a reply ends that person's sequence (status "replied")
+- A wait step right after an invite counts from the accept, not from the invite. The editor shows steps as a timeline and stores them as invite/message steps with a wait step before each one after the first (src/components/sequences/shared.ts: toTimeline / toApiSteps)
+- Sending hours (sendFromHour, sendUntilHour, sendWeekdaysOnly, timezone on OutreachSequence) only hold back the timer; "Send the next few now" ignores them
+- Removing a person sets their SequenceExecution status to "removed" instead of deleting it; /api/sequences/[id]/people adds people, .../people/[executionId] removes, .../retry retries a failed one
+- Sequence screens live in src/components/sequences/ (editor, people picker, results page, add-to-sequence dialog); toasts need the Toaster mounted in dashboard-shell.tsx
+- Schema changes are applied to the live DB by hand before pushing (the container does not run migrations)
 - SequenceExecutionStep rows are the send log: the daily limit counts "sent" rows from the last 24h, and an "accepted" row on the invite step marks the accept. Don't delete step rows of a started sequence
 - targetProfiles stored as JSON string in DB, parsed/serialized manually (not native JSON)
 - CSV import max 100 contacts per file

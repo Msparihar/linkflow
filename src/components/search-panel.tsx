@@ -30,7 +30,10 @@ import {
   AlertCircle,
   MapPin,
   FileText,
+  Zap,
 } from "lucide-react"
+import { AddToSequenceDialog } from "@/components/sequences/add-to-sequence-dialog"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { cn } from "@/lib/utils"
 
@@ -63,6 +66,8 @@ export function SearchPanel() {
   const [inviteStatus, setInviteStatus] = useState<"idle" | "success" | "error">("idle")
   const [inviteError, setInviteError] = useState("")
   const [sentInvites, setSentInvites] = useState<Set<string>>(new Set())
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [sequenceDialogOpen, setSequenceDialogOpen] = useState(false)
 
   const { data: templates = [] } = useQuery({
     queryKey: ["templates"],
@@ -125,6 +130,7 @@ export function SearchPanel() {
 
   const handleSearch = () => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) return
+    setPicked(new Set())
     searchMutation.mutate(searchQuery.trim())
   }
 
@@ -177,6 +183,14 @@ export function SearchPanel() {
   const profiles = searchMutation.data || []
   const hasSearched = searchMutation.isSuccess || searchMutation.isError
 
+  const togglePicked = (id: string) =>
+    setPicked((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
   return (
     <div className="space-y-6">
       <div>
@@ -210,11 +224,34 @@ export function SearchPanel() {
         </div>
       ) : profiles.length > 0 ? (
         <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Checkbox
+                checked={profiles.every((p) => picked.has(p.id))}
+                onCheckedChange={(checked) => setPicked(checked ? new Set(profiles.map((p) => p.id)) : new Set())}
+              />
+              Select all {profiles.length}
+            </label>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={picked.size === 0}
+              onClick={() => setSequenceDialogOpen(true)}
+            >
+              <Zap className="w-4 h-4 mr-2" />
+              Add {picked.size || ""} to sequence
+            </Button>
+          </div>
           {profiles.map((profile) => (
             <div
               key={profile.id}
               className="flex items-center gap-3 p-4 rounded-lg border bg-card hover:shadow-md transition-shadow overflow-hidden"
             >
+              <Checkbox
+                checked={picked.has(profile.id)}
+                onCheckedChange={() => togglePicked(profile.id)}
+                aria-label={`Select ${profile.firstName} ${profile.lastName}`}
+              />
               <Avatar className="w-12 h-12 flex-shrink-0">
                 <AvatarImage src={profile.profilePicture || "/placeholder.svg"} />
                 <AvatarFallback className="bg-primary/10 text-primary">
@@ -293,6 +330,13 @@ export function SearchPanel() {
           </p>
         </div>
       )}
+
+      <AddToSequenceDialog
+        open={sequenceDialogOpen}
+        onOpenChange={setSequenceDialogOpen}
+        profiles={profiles.filter((p) => picked.has(p.id))}
+        onAdded={() => setPicked(new Set())}
+      />
 
       {/* Invite Dialog */}
       <Dialog open={!!selectedProfile} onOpenChange={() => handleCloseInviteDialog()}>

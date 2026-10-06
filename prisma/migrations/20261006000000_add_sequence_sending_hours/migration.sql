@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "OutreachSequence"
+  ADD COLUMN "sendFromHour" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "sendUntilHour" INTEGER NOT NULL DEFAULT 24,
+  ADD COLUMN "sendWeekdaysOnly" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN "timezone" TEXT NOT NULL DEFAULT 'UTC';
